@@ -5,7 +5,6 @@ library(ggplot2)
 
 # Read in exposure data
 
-pqtl <- readRDS(here("data", "ancestry_pqtl.rds"))
 pqtl <- readRDS(file.path("data", "ancestry_pqtl.rds"))
 class(pqtl)
 
@@ -119,3 +118,5 @@ geom_point() +
 geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96)) +
 geom_vline(xintercept=0)
 
+ggsave(file=file.path("results", "eur.png"))
+save(res, file=file.path("results", "eur.rdata"))
