@@ -42,8 +42,9 @@ Rscript scripts/extract_mdd.r
 
 TODO:
 
-- Perform analysis
-- Aggregate results
-
-
+- PGC multi-ancestry MDD data - waiting for publication for summary stats to become available
+- Linda is running GWAS on MDD in UGR
+- Catherine running GWAS on MDD in ED6 and Neurogap (Uganda cohorts)
+- Sandra to be included in future conversations / work
+- Examine drugability of proteins being analysed - Anthony
 
