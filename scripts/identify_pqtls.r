@@ -26,6 +26,8 @@ a <- read_xlsx(here("scratch", "media-2.xlsx"), sheet="ST6", skip=2) %>%
 
 a <- generate_vid(a, "ea", "oa", "A1FREQ (discovery)", "BETA (discovery, wrt. A1)", "code", "chr37", "pos37")
 
+saveRDS(a, file=here("data", "ukb_pqtls.rds"))
+
 pqtl_cis <- subset(a, `cis/trans` == "cis") %>%
     mutate(code=paste0(chr37, ":", pos37))
 
