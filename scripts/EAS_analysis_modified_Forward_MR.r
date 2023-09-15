@@ -9,7 +9,7 @@ library(data.table)
 # Read in exposure data
 
 #pqtl <- readRDS(here("../mr-uganda-hackathon-2023-6/data", "ancestry_pqtl.rds"))
-pqtl <- readRDS(file.path("../mr-uganda-hackathon-2023-6/data", "ancestry_pqtl.rds"))
+pqtl <- readRDS(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "ancestry_pqtl.rds"))
 class(pqtl)
 print(pqtl)
 #pqtl <- readRDS(file.path("data", "ancestry_pqtl.rds"))
@@ -38,7 +38,7 @@ table(pqtl$prot)
 # pqtl data doesn't have rsid - get that from combined_pqtl
 
 #pqtl_combined <- readRDS(file.path("data", "combined_pqtl.rds"))
-pqtl_combined <- readRDS(file.path("data", "combined_pqtl.rds"))
+pqtl_combined <- readRDS(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "combined_pqtl.rds"))
 
 head(pqtl_combined)
 
@@ -54,8 +54,8 @@ dim(pqtl)
 
 # Get the outcome data
 
-file.exists(file.path("../mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
-load(file.path("../mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
+file.exists(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
+load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
 
 # Look at eur MDD GWAS
 head(eas)
@@ -130,6 +130,6 @@ ggplot(res, aes(y=exposure, x=b)) +
   geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96)) +
   geom_vline(xintercept=0)
 
-save(res, file=file.path("../mr-uganda-hackathon-2023-6/results", "eas.rdata"))
-ggsave(file=file.path("../mr-uganda-hackathon-2023-6/results", "easplot.png"))
+save(res, file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/results", "eas.rdata"))
+ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/results", "easplot.png"))
 

@@ -24,7 +24,7 @@ library(png)
 # Read in exposure data
 #setwd("C:/Users/Personal/Documents/Mendelian Randomization/mr-uganda-hackathon-2023-6/")
 #pqtl <- readRDS(here("../mr-uganda-hackathon-2023-6/data", "ancestry_pqtl.rds"))
-pqtl <- readRDS(file.path("../mr-uganda-hackathon-2023-6/data", "ancestry_pqtl.rds"))
+pqtl <- readRDS(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "ancestry_pqtl.rds"))
 class(pqtl)
 
 
@@ -50,7 +50,7 @@ table(pqtl$prot)
 
 # pqtl data doesn't have rsid - get that from combined_pqtl
 
-pqtl_combined <- readRDS(file.path("../mr-uganda-hackathon-2023-6/data", "combined_pqtl.rds"))
+pqtl_combined <- readRDS(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "combined_pqtl.rds"))
 
 head(pqtl_combined)
 
@@ -66,7 +66,7 @@ head(pqtl)
 
 # Get the outcome data
 
-load(file.path("../mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
+load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
 
 # Look at eur MDD GWAS
 head(afr)
@@ -90,7 +90,7 @@ exp_dat <- format_data(pqtl,
 head(exp_dat)
 
 
-afr$PVAL <- 10^-afr$P
+#afr$PVAL <- 10^-afr$P
 head(afr)
 
 #10^-pqtl$LOG10P
@@ -142,32 +142,8 @@ ggplot(res, aes(y=exposure, x=b)) +
   geom_vline(xintercept=0)
 
 
-save(res, file=file.path("../mr-uganda-hackathon-2023-6/results", "afr.rdata"))
-ggsave(file=file.path("../mr-uganda-hackathon-2023-6/results", "afrplot.png"))
+save(res, file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/results", "afr.rdata"))
+ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/results", "afrplot.png"))
 
 
 
-#combine all adataframes:
-
-# Adding ancestry column to each data frame
-res1_afr$ancestry <- "Ancestry AFR"
-res2_eur$ancestry <- "Ancestry EUR"
-res_eas$ancestry <- "Ancestry EAS"
-res-sas$ancestry <- "Ancestry SAS"
-
-# Combining all data frames into one
-res_combined <- bind_rows(res_afr, res_eur, res_eas, res_sas)
-
-# Plotting
-p <- ggplot(res_combined, aes(y=exposure, x=b, color=ancestry)) +
-  geom_point() +
-  geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96)) +
-  geom_vline(xintercept=0, linetype="dashed") +
-  labs(title = "Your Plot Title",
-       x = "X Axis Label",
-       y = "Y Axis Label")
-
-# Display the plot
-print(p)
-
-  
