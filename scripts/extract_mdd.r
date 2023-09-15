@@ -5,11 +5,8 @@ library(here)
 library(tidyr)
 
 
-# Reading and subsetting for only the 11 proteins 
-prot1 <- readRDS(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon/data", "combined_pqtl.rds"))
-MDDprot <- read.table(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon/data", "Allprotlist_chrposcode.txt"))
-names(MDDprot) <- c("chr", "pos", "rsid", "prot")
-prot <- subset(prot1, prot %in% MDDprot$prot)
+# Reading in proteins and creating a column having chromosome and position information
+prot <- readRDS(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon/data", "combined_pqtl.rds"))
 chrpos <- paste0(prot$chr, ":", prot$pos)
 
 # AFR
