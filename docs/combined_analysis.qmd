@@ -1,3 +1,13 @@
+---
+title: Combined forward MR analysis of all ancestries
+---
+
+## Background
+
+
+## Get the data
+
+```{r}
 library(dplyr)
 library(ggplot2)
 
@@ -27,10 +37,11 @@ eas$pop <- "EAS"
 res_comb <- bind_rows(eur,eas,csa,afr)
 
 head(res_comb)
-View(res_comb)
+```
 
-#plot results of combined data
+plot results of combined data
 
+```{r}
 ggplot(res_comb, aes(y=pop, x=b, color=pop)) +
   geom_point() +
   geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96)) +
@@ -50,8 +61,12 @@ ggplot(res_comb, aes(y=pop, x=b, color=pop)) +
 # Display and save results
 
 ggsave(file=file.path("results", "combined.png"), width=10, height=10)
+```
+
 
 ## Heterogeneity analysis
+
+```{r}
 fixed_effects_meta_analysis <- function(beta_vec, se_vec) {
     w <- 1 / se_vec^2
     beta <- sum(beta_vec * w, na.rm=T) / sum(w, na.rm=T)
@@ -65,16 +80,28 @@ fixed_effects_meta_analysis <- function(beta_vec, se_vec) {
     Qpval <- pchisq(Q, Qdf, lower.tail=FALSE)
     return(list(beta=beta, se=se, Q=Q, Qdf=Qdf, Qpval=Qpval, Qj=Qj, Qjpval=Qjpval))
 }
+```
+
 
 # Example
+
+```{r}
 x <- subset(res_comb, exposure == "AKT3")
 fixed_effects_meta_analysis(x$b, x$se)
+```
+
 
 # Example
+
+```{r}
 x <- subset(res_comb, exposure == "FES")
 fixed_effects_meta_analysis(x$b, x$se)
+```
+
 
 # Do het analysis for all proteins
+
+```{r}
 res <- lapply(unique(res_comb$exposure), \(e) {
   x <- subset(res_comb, exposure == e)
   res <- fixed_effects_meta_analysis(x$b, x$se)
@@ -82,8 +109,11 @@ res <- lapply(unique(res_comb$exposure), \(e) {
   Qj <- tibble(exposure=e, pop=x$pop, Qj=res$Qj, Qjpval=res$Qjpval)
   return(list(Q,Qj))  
 })
+```
 
 # Organise the results for global heterogeneity (Q)
+
+```{r}
 resQ <- lapply(res, \(x) x[[1]]) %>% bind_rows()
 
 # Organise the results for per-study heterogeneity contributions (Qj)
@@ -91,19 +121,29 @@ resQj <- lapply(res, \(x) x[[2]]) %>% bind_rows()
 
 # Correct for multiple testing using FDR
 resQj$fdr <- p.adjust(resQj$Qjpval, "fdr")
+```
+
 
 # Visualise the per-study heterogeneity (pval)
+
+
+```{r}
 ggplot(resQj, aes(x=exposure, y=-log10(Qjpval))) +
 geom_point(aes(colour=pop)) +
 geom_hline(yintercept=-log10(0.05))
+```
+
+
 
 # Visualise the per-study heterogeneity (FDR)
+
+```{r}
 ggplot(resQj, aes(x=exposure, y=-log10(fdr))) +
 geom_point(aes(colour=pop)) +
 geom_hline(yintercept=-log10(0.05))
+```
 
-
-
+```{r}
 res_m <- inner_join(res_comb, resQj, by=c("exposure", "pop"))
 res_m <- (res_comb, resQj, by=c("exposure", "pop"))
 
@@ -126,8 +166,9 @@ ggplot(bind_rows(res_m, resQ), aes(y=pop, x=b, color=pop)) +
     strip.text.y=element_text(angle=0)
   ) +
   scale_colour_brewer(type="qual")
+
 # todo
 # - make the colours clearer
 # - Choose how to highlight heterogeneity
 # - Order combined to be at the bottom
-
+```
