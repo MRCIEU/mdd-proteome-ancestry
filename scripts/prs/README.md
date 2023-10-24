@@ -12,13 +12,3 @@ UKB scripting guidance taken from: https://github.com/pjgreer/ukb-rap-tools/tree
 
 
 
-1. Upload PRS scores
-2. Get proteomic data and the list of IDs to include
-3. Extract PRS SNPs and IDs from bgen files
-4. Combine bgen files, filter for quality and combine into a single plink file
-5. Generate scores
-
-
-
-plink --bfile ~/repo/opengwas-api-internal/opengwas-api/app/ld_files/EUR --indep 2000 500 1.05 --out 1kgeur
-
