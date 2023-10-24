@@ -53,7 +53,7 @@ dx run swiss-army-knife \
 rm KGref*
 
 # Extraction of snps from bgen -> vcf -> plink 
-for i in {1..21}; do
+for i in {1..22}; do
     run_snps="
     bgenix -g ${data_field}_c${i}_b0_v3.bgen \
     -incl-rsids ${rsidlist} \
@@ -65,11 +65,12 @@ for i in {1..21}; do
     cut -f 2 chr_${i}.bim | cut -d ';' -f 1 > chr_${i}
     
     paste chr_${i}.bim chr_${i} | \
-    cut -f 1,7,3,4,5,6 > chr_${i}.bim
+    awk '{ print \$1, \$7, \$3, \$4, \$5, \$6 }' > temp_${i}
+    cp chr_${i}.bim chr_${i}.bim.orig
+    mv temp_${i} chr_${i}.bim
 
     rm chr_${i} chr_${i}.vcf.gz
     "
-
     dx run swiss-army-knife \
     -iin="${imp_file_dir}/${data_field}_c${i}_b0_v3.bgen" \
     -iin="${imp_file_dir}/${data_field}_c${i}_b0_v3.sample" \
@@ -84,19 +85,13 @@ for i in {1..21}; do
     --priority "normal"
 done
 
-
-docker pull lifebitai/bgenix
-
-docker run -v /mntlifebitai/bgenix
-
 combine_snps='
 touch mergelist.txt
 
-for i in {2..22}; do echo "/data/ancestry/chr_${i} >> mergelist.txt"; done
+for i in {2..22}; do echo "/mnt/project/data/ancestry/chr_${i}" >> mergelist.txt; done
 
-plink --bfile /data/ancestry/chr_1 --merge-list mergelist.txt --make-bed --out ukb_pruned
+plink --bfile /mnt/project/data/ancestry/chr_1 --merge-list mergelist.txt --make-bed --out ukb_pruned
 '
-
 
 dx run swiss-army-knife \
     -icmd="${combine_snps}" \
@@ -156,3 +151,66 @@ wget https://www.kingrelatedness.com/ancestry/KGref.fam.xz
 
 
 
+wget https://s3.amazonaws.com/plink1-assets/plink_linux_x86_64_20220402.zip && \
+    mkdir plinktemp && mv plink_linux_x86_64_20220402.zip plinktemp && cd plinktemp && \
+    unzip plink_linux_x86_64_20220402.zip && \
+    mv plink /bin/ && \
+    cd ../ && rm -r plinktemp
+    
+touch mergelist.txt
+
+for i in {2..22}; do echo "/mnt/project/data/ancestry/chr_${i}.bed /mnt/project/data/ancestry/chr_${i}.bim.orig /mnt/project/data/ancestry/chr_${i}.fam" >> mergelist.txt; done
+
+plink --bfile /mnt/project/data/ancestry/chr_1 --bim /mnt/project/data/ancestry/chr_1.bim.orig --merge-list mergelist.txt --make-bed --out ukb_pruned
+
+
+
+# need to remove SNPs that are duplicate positions
+
+
+
+
+
+docker pull lifebitai/bgenix
+
+docker run -v /mntlifebitai/bgenix
+
+combine_snps='
+touch mergelist.txt
+
+for i in {2..22}; do echo "/data/ancestry/chr_${i} >> mergelist.txt"; done
+
+plink --bfile /data/ancestry/chr_1 --merge-list mergelist.txt --make-bed --out ukb_pruned
+'
+
+
+## remove duplicate snps
+
+wget https://s3.amazonaws.com/plink1-assets/plink_linux_x86_64_20220402.zip && \
+    mkdir plinktemp && mv plink_linux_x86_64_20220402.zip plinktemp && cd plinktemp && \
+    unzip plink_linux_x86_64_20220402.zip && \
+    mv plink /bin/ && \
+    cd ../ && rm -r plinktemp
+
+bfile="/mnt/project/data/ancestry/ukb_pruned"
+cp $bfile.* .
+
+cut -f 2 $bfile.bim | cut -d ";" -f 1 | sort | uniq -c | awk '{ if($1 > 1) print $2";" }' > duprsids.txt
+grep -f duprsids.txt $bfile.bim | cut -f 2 > remsnps.txt
+plink --bfile $bfile --exclude remsnps.txt --make-bed --out ukb_pruned
+
+# update bim file to just have rsids
+cut -f 2 ukb_pruned.bim | cut -d ';' -f 1 > ukb_pruned
+paste ukb_pruned.bim ukb_pruned | \
+awk '{ print $1, $7, $3, $4, $5, $6 }' > temp_${i}
+cp ukb_pruned.bim ukb_pruned.bim.orig
+mv temp_${i} ukb_pruned.bim
+rm ukb_pruned
+
+
+# king
+cp /mnt/project/data/ancestry/king .
+chmod 755 king
+cp /mnt/project/data/ancestry/KGref* .
+
+./king -b KGref.bed,ukb_pruned.bed --pca --projection --pngplot --prefix ukb
