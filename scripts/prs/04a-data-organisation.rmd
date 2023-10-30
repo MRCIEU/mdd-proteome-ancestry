@@ -1,0 +1,394 @@
+---
+title: "Organising proteomic and depression data UK Biobank"
+output: html_notebook
+---
+
+
+```{r}
+library(dplyr)
+library(data.table)
+library(ggplot2)
+library(parallel)
+library(glue)
+library(tidyr)
+pops <- c("AFR", "EUR", "EAS", "SAS")
+prsdir <- "/mnt/project/mdd-prs"
+```
+
+
+## Background
+
+- get PCs
+- get depression status
+- identify individuals who did not have depression at baseline
+- Read in PRS scores for each ancestry, and protein levels
+- Regress protein ~ PRS for each protein and ancestry, including covariates
+- Lookup agreement of assocs across ancestries
+- Regression in controls only (i.e. excluding individuals who had first episode before enrollment date)
+
+
+## Read in data
+
+Protein level data is 50k samples by 1500 protein levels. Check missingness
+
+```{r}
+prot <- fread(file.path(prsdir, "data.csv"), sep=",", fill=TRUE)
+prot <- as_tibble(prot)
+dim(prot)
+sum(is.na(prot)) / sum(!is.na(prot))
+nas <- apply(prot, 1, \(x) sum(is.na(x)))
+plot(nas)
+```
+
+```{r}
+length(nas)
+sum(nas > 0.1*ncol(prot))
+```
+
+TODO: remove proteins and individuals with high missingness e.g. > 10%
+
+Format data...
+
+```{r}
+prot2 <- lapply(prot, as.numeric) %>% bind_cols()
+prot2[1:10,1:10]
+```
+
+```{r}
+ids <- prot2[,1]
+prot2 <- prot2[,-1]
+unlist(prot2[,100]) %>% hist
+```
+
+Lots of outliers. Set any to NA with values mean +/- 5*sd
+
+```{r}
+remove_outliers <- function(v, sds=5) {
+  m <- mean(v, na.rm=T)
+  s <- sd(v, na.rm=T)
+  v[v > (m + s*sds)] <- NA
+  v[v < (m - s*sds)] <- NA
+  return(v)
+}
+prot3 <- lapply(prot2, \(x) unlist(x) %>% remove_outliers) %>% bind_cols()
+unlist(prot3[,100]) %>% hist
+```
+
+## Read in polygenic scores
+
+Each population has a different polygenic score generated from PRScsx
+
+```{r}
+s <- lapply(pops, \(x) {
+  fread(file.path(prsdir, "PRS", paste0("mdd_score_", x, ".profile"))) %>%
+    as_tibble() %>%
+    mutate(pop=x)
+}) %>% bind_rows()
+s
+```
+
+Distributions of scores
+
+```{r}
+ggplot(s, aes(SCORE)) +
+  geom_histogram() +
+  facet_wrap(~ pop)
+```
+
+Normalise scores by ancestry so that results are more easily comparable
+
+```{r}
+s <- s %>% group_by(pop) %>%
+  mutate(normscore = scale(SCORE) %>% drop)
+```
+
+Organise protein levels further
+
+```{r}
+prot4 <- lapply(pops, \(x) {
+  prot3$id <- as.integer(unlist(ids))
+  inner_join(
+    s %>% filter(pop == x) %>% select(id=FID, normscore),
+    prot3
+  )
+})
+
+names(prot4) <- pops
+prot4[[1]][1:10,1:10]
+```
+
+## Get Principal components
+
+Generated independently within each ancestry.
+
+```{r}
+pcs <- lapply(pops, \(x) {
+  fread(file.path(prsdir, "PRS", paste0("mdd_score_", x, ".eigenvec"))) %>%
+  mutate(pop=x)
+}) %>% bind_rows()
+pcs
+```
+Plot PCs for each ancestry
+
+```{r}
+pcs %>%
+  ggplot(aes(V3, V4)) +
+  geom_point() +
+  facet_wrap(~ pop, scale="free")
+```
+
+Plot ancestry by global PCs. Read in PCs generated on all individuals and then annotate individuals by their assigned ancestry
+
+```{r}
+ukbpcs <- fread("/mnt/project/Bulk/Genotype Results/Genotype calls/ukb_sqc_v2.txt")
+str(ukbpcs)
+fam <- fread("/mnt/project/Bulk/Genotype Results/Genotype calls/ukb22418_cY_b0_v2.fam")
+dim(fam)
+ukbpcs$eid <- fam$V1
+table(pcs$V1 %in% ukbpcs$eid)
+
+temp <- inner_join(
+  ukbpcs %>% select(eid, V26, V27),
+  pcs %>% select(eid=V1, pop, V3, V4),
+)
+
+ggplot(temp, aes(V26, V27)) +
+  geom_point(aes(colour=pop))
+
+```
+
+Looks like individuals are assigned to ancestry reasonably well
+
+## Get other variables
+
+Depression phenotypes, including case control status, age of first episode, age of enrollment into UK Biobank.
+Blood samples were taken at enrollment, therefore anyone whose first episode was after enrollment form a prospective cohort.
+
+```{r}
+phen <- fread(file.path(prsdir, "mdd-prs-baseline_participant.csv"))
+names(phen) <- c("eid", "age_first_episode", "age_enrollment", "yearbirth", "sex", "deprivation")
+table(prot$eid %in% phen$eid)
+table(pcs$V1 %in% phen$eid)
+dim(pcs)
+table(s$IID %in% pcs$V1)
+```
+
+Ancestry proportions in the sample
+
+```{r}
+phen <- inner_join(phen, pcs %>% select(eid=V1, pop))
+table(phen$pop)
+```
+
+Depression prevalence
+
+```{r}
+phen$depression <- as.numeric(phen$age_first_episode != "")
+table(phen$depression)
+```
+
+Depression prevalence by ancestry
+
+```{r}
+table(phen$depression, phen$pop)
+```
+
+```{r}
+phen$year_enrollment <- phen$yearbirth + phen$age_enrollment
+hist(phen$year_enrollment)
+```
+
+```{r}
+phen$age_first_episode[phen$age_first_episode=="Do not know"] <- phen$age_enrollment[phen$age_first_episode=="Do not know"]
+phen$age_first_episode[phen$age_first_episode=="Prefer not to answer"] <- phen$age_enrollment[phen$age_first_episode=="Prefer not to answer"]
+phen$age_first_episode <- as.numeric(phen$age_first_episode)
+hist(phen$age_first_episode)
+```
+
+```{r}
+dat <- inner_join(
+  pcs %>% select(eid=V1, V1:V22),
+  phen
+)
+dat <- inner_join(dat, s %>% select(eid=IID, normscore))
+str(dat)
+```
+
+```{r}
+save(dat, prot4, file="ukb_prot_mdd.rdata")
+```
+
+## Perform associations
+
+```{r}
+fast_assoc <- function(y, x) {
+	index <- is.finite(y) & is.finite(x)
+	n <- sum(index)
+	y <- y[index]
+	x <- x[index]
+	#vx <- var(x)
+	vy <- var(y)
+	bhat <- stats::cov(y, x) / vy
+	ahat <- mean(x) - bhat * mean(y)
+	# fitted <- ahat + x * bhat
+	# residuals <- y - fitted
+	# SSR <- sum((residuals - mean(residuals))^2)
+	# SSF <- sum((fitted - mean(fitted))^2)
+
+	rsq <- (bhat * vy)^2 / (vy * var(x))
+	fval <- rsq * (n-2) / (1-rsq)
+	tval <- sqrt(fval)
+	se <- abs(bhat / tval)
+
+	# Fval <- (SSF) / (SSR/(n-2))
+	# pval <- pf(Fval, 1, n-2, lowe=F)
+	p <- stats::pf(fval, 1, n-2, lower.tail=FALSE)
+	return(list(
+		ahat=ahat, bhat=bhat, se=se, fval=fval, pval=p, n=n
+	))
+}
+
+phewas <- function(y, g, logistic=FALSE) {
+	out <- matrix(0, ncol(g), 6)
+	if(logistic)
+	{
+		stopifnot(all(y %in% c(0,1)))
+		for(i in 1:ncol(g))
+		{
+			o <- logistic_assoc(y, g[,i])
+			out[i, ] <- unlist(o)
+		}
+	} else {
+		for(i in 1:ncol(g))
+		{
+			o <- fast_assoc(y, g[,i])
+			out[i, ] <- unlist(o)
+		}
+	}
+
+	out <- dplyr::as_tibble(out, .name_repair="minimal")
+	names(out) <- names(o)
+	out$snp <- 1:ncol(g)
+	return(out)
+}
+```
+
+Perform simple analysis - no covariates etc
+
+```{r}
+rsimple <- lapply(pops, \(p) {
+  x <- prot4[[p]]
+  o <- phewas(y=unlist(x$normscore), g=as.matrix(as.matrix(x[,4:ncol(x)])))
+  o$pop=p
+  o$prot <- colnames(x[4:ncol(x)])
+  o$fdr <- p.adjust(o$pval, "fdr")
+  return(o)
+}) %>% bind_rows()
+
+rsimple %>% group_by(pop) %>%
+  summarise(n=sum(fdr < 0.05))
+```
+
+Try comparing across ancestries
+
+```{r}
+rw <- spread(rsimple %>% select(pop, bhat, prot), key=pop, value=bhat)
+head(rw)
+```
+
+```{r}
+eur_index <- subset(rsimple, pop=="EUR" & fdr < 0.05)$prot
+afr_index <- subset(rsimple, pop=="AFR" & fdr < 0.05)$prot
+summary(lm(AFR ~ EUR, rw, subset=rw$prot %in% eur_index))
+summary(lm(AFR ~ EUR, rw))
+summary(lm(EAS ~ EUR, rw, subset=rw$prot %in% eur_index))
+summary(lm(SAS ~ EUR, rw, subset=rw$prot %in% eur_index))
+summary(lm(AFR ~ EUR, rw, subset=rw$prot %in% eur_index))
+
+summary(lm(EUR ~ AFR, rw, subset=rw$prot %in% afr_index))
+summary(lm(EUR ~ AFR, rw))
+
+summary(lm(SAS ~ AFR, rw, subset=rw$prot %in% afr_index))
+summary(lm(EAS ~ AFR, rw, subset=rw$prot %in% afr_index))
+summary(lm(EAS ~ AFR, rw))
+
+```
+
+
+
+
+```{r}
+rwm <- as.matrix(rw[,-1])
+rownames(rwm) <- unlist(rw[,1])
+heatmap(rwm)
+```
+
+
+Perform associations, adjusting for PCs, age etc
+
+```{r}
+phewas_covs <- function(prot4, dat) {
+  lapply(names(prot4), \(anc) {
+    x <- prot4[[anc]]
+    x <- subset(x, id %in% dat$eid)
+    ind <- match(x$id, dat$eid)
+    d <- dat[ind, ]
+    stopifnot(all(d$eid == x$id))
+    mclapply(4:ncol(x), \(i) {
+      o <- summary(lm(x[[i]] ~ d$normscore + d$age_enrollment + d$sex + d$V3 + d$V4 + d$V5 + d$V6 + d$V7 + d$V8 + d$V9 + d$V10 + d$V11 + d$V12))
+      tibble(pop=anc, prot=names(x)[i], bhat=o$coef[2,1], se=o$coef[2,2], pval=o$coef[2,4], n=o$df[1] + o$df[2])
+    }, mc.cores=parallel::detectCores()) %>% bind_rows()
+  }) %>% bind_rows()
+}
+
+rcovs <- phewas_covs(prot4, dat)
+rcovs$fdr <- p.adjust(rcovs$pval, "fdr")
+table(rcovs$fdr < 0.05, rcovs$pop)
+```
+
+```{r}
+rwc <- spread(rcovs %>% select(pop, bhat, prot), key=pop, value=bhat)
+rwc
+```
+Correlation of mddprs-prot assocs across ancestries
+
+```{r}
+cor(rwc[,-1], use="pair")
+```
+
+regression of mddprs-prot assocs across ancestries, using all proteins, or just those that were FDR < 0.05 in the discovery ancestry
+
+```{r}
+comps <- expand.grid(pop1=pops, pop2=pops, fdr=c(0.05, 1), b=NA, se=NA, pval=NA, n=NA)
+comps <- lapply(1:nrow(comps), \(i) {
+  ind <- subset(rcovs, pop==comps$pop1[i]) %>%
+    filter(fdr < comps$fdr[i]) %>%
+    {.$prot}
+  if(length(ind) > 20) {
+    o <- summary(lm(rwc[[comps$pop1[[i]]]][rwc$prot %in% ind] ~ rwc[[comps$pop2[[i]]]][rwc$prot %in% ind]))
+    comps$b[i] <- o$coef[2,1]
+    comps$se[i] <- o$coef[2,2]
+    comps$pval[i] <- o$coef[2,4]
+    comps$n[i] <- length(ind)
+  }
+  return(comps[i,])
+}) %>% bind_rows()
+comps %>%
+  filter(pop1 != pop2) %>%
+  ggplot(., aes(y=b, x=pop2)) +
+  geom_point(aes(size=-log10(pval))) +
+  facet_grid(pop1 ~ as.factor(fdr))
+
+```
+
+```{r}
+save(rsimple, rcovs, file="prelim-results.rdata")
+```
+
+## Excluding cases
+
+```{r}
+dat$prospective <- dat$age_first_episode > dat$age_enrollment
+table(dat$prospective, dat$pop)
+```
+
