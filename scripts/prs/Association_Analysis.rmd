@@ -219,7 +219,7 @@ fixed_effects_meta_analysis <- function(beta_vec, se_vec) {
 ```
 
 
-# Do het analysis for all proteins
+##Do het analysis for all proteins
 
 ```{r}
 rcovs_sig<- subset(rcovs1, fdr < 0.05)
@@ -302,59 +302,6 @@ ggplot(resQ %>% filter(exposure %in% afr_sig), aes(x=exposure, y=-log10(Qpval)))
   geom_point() +
   geom_hline(yintercept=-log10(0.05/length(unique(afr_sig))))
 ```
-
-
-## Expected vs observed replication
-
-Take significant results from EUR
-Even though the power is lower in other populations, is the degree of association high enough to suggest that overall, the effects are the same
-
-
-```{r}
-evso <- function(b_disc, b_rep, se_disc, se_rep, alpha)
-{
-  p_sign <- pnorm(-abs(b_disc) / se_disc) * pnorm(-abs(b_disc) / se_rep) + ((1 - pnorm(-abs(b_disc) / se_disc)) * (1 - pnorm(-abs(b_disc) / se_rep)))
-  p_sig <- pnorm(-abs(b_disc) / se_rep + qnorm(alpha / 2)) + (1 - pnorm(-abs(b_disc) / se_rep - qnorm(alpha / 2)))
-  p_rep <- pnorm(abs(b_rep)/se_rep, lower.tail=FALSE)
-  res <- tibble::tibble(
-    nsnp=length(b_disc),
-    metric=c("Sign", "Sign", "P-value", "P-value"),
-    datum=c("Expected", "Observed", "Expected", "Observed"),
-    value=c(sum(p_sign, na.rm=TRUE), sum(sign(b_disc) == sign(b_rep)), sum(p_sig, na.rm=TRUE), sum(p_rep < alpha, na.rm=TRUE))
-  )
-  return(list(res=res, variants=dplyr::tibble(sig=p_sig, sign=p_sign)))
-}
-```
-
-AFR vs EUR
-
-```{r}
-eur_prot <- subset(rcovs_sig, pop == "EUR")$prot
-temp1 <- rcovs1[rcovs1$pop == "EUR" & rcovs1$prot %in% eur_prot, ]
-temp2 <- rcovs1[rcovs1$pop == "AFR" & rcovs1$prot %in% eur_prot, ]
-evso(b_disc = temp1$bhat, b_rep = temp2$bhat, se_disc = temp1$se, se_rep = temp2$se, 0.05)
-```
-
-
-
-```{r}
-afr_prot <- subset(rcovs_sig, pop == "AFR")$prot
-temp1 <- rcovs1[rcovs1$pop == "AFR" & rcovs1$prot %in% afr_prot, ]
-temp2 <- rcovs1[rcovs1$pop == "EUR" & rcovs1$prot %in% afr_prot, ]
-evso(b_disc = temp1$bhat, b_rep = temp2$bhat, se_disc = temp1$se, se_rep = temp2$se, 0.05)
-
-```
-
-
-SAS vs EUR
-
-```{r}
-eur_prot <- subset(rcovs_sig, pop == "EUR")$prot
-temp1 <- rcovs1[rcovs1$pop == "EUR" & rcovs1$prot %in% eur_prot, ]
-temp2 <- rcovs1[rcovs1$pop == "SAS" & rcovs1$prot %in% eur_prot, ]
-evso(b_disc = temp1$bhat, b_rep = temp2$bhat, se_disc = temp1$se, se_rep = temp2$se, 0.05)
-```
-
 
 
 # Organise the results for per-study heterogeneity contributions (Qj)
@@ -610,3 +557,287 @@ ggplot(res_m, aes(y=pop, x=bhat, color=pop)) +
   scale_colour_manual(values=custom_colors)
 
 ```
+
+
+Obtaining protein names that are significant in EAS, SAS and AFR
+```{r}
+selected_pop <- rcovs_sig %>%
+  filter(pop %in% c("AFR", "SAS", "EAS")) %>%
+  select(prot)
+
+dim(selected_pop)
+
+```
+Obtaining protein information for all
+
+```{r}
+selected_pop_all <- subset(rcovs1, prot %in% selected_pop$prot)
+table(selected_pop_all$pop)
+```
+
+
+Do heterogeneity analysis for all significant proteins in SAS ancestry for all ancestries
+
+```{r, fig.width=12, fig.height=16}
+res <- lapply(unique(selected_pop_all$prot), \(e) {
+  x <- subset(selected_pop_all, prot == e)
+  res <- fixed_effects_meta_analysis(x$bhat, x$se)
+  Q <- tibble(exposure=e, beta=res$beta, se=res$se, Q=res$Q, Qdf=res$Qdf, Qpval=res$Qpval)
+  Qj <- tibble(exposure=e, pop=x$pop, Qj=res$Qj, Qjpval=res$Qjpval)
+  return(list(Q,Qj))
+})
+
+resQ <- lapply(res, \(x) x[[1]]) %>% bind_rows()
+
+
+
+# Organise the results for per-study heterogeneity contributions (Qj)
+
+resQj <- lapply(res, \(x) x[[2]]) %>% bind_rows()
+
+# Correct for multiple testing using FDR
+resQj$fdr <- p.adjust(resQj$Qjpval, "fdr")
+
+res_m <- inner_join(selected_pop_all, resQj, by=c("prot"="exposure", "pop"))
+
+
+names(resQ)[names(resQ)=="beta"] <- "b"
+resQ$pop <- "Combined"
+resQ$Qjpval <- 1
+
+
+# Define a custom color palette
+custom_colors <- c("SAS" = "#D32F2F", "EUR" = "#1976D2", "AFR" = "#388E3C", "EAS" = "#FBC02D")
+
+
+
+ggplot(res_m, aes(y=pop, x=bhat, color=pop)) +
+  geom_point(aes(size=fdr.y < 0.05)) +
+  geom_errorbarh(aes(xmin=bhat-se*1.96, xmax=bhat+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Forest plot of all significant proteins across all ancestries",
+       x = "beta",
+       y = "Proteins") +
+   facet_grid(prot ~ .)+
+   theme_minimal() +  # Apply a minimal theme
+  theme(
+    plot.title = element_text(hjust = 0.5), # Center the plot title
+    axis.text.y=element_blank(), # remove y axis text
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_colour_manual(values=custom_colors)
+
+```
+
+The forest plot is too long, the following analysis is for per ancestry significant proteins for all across all ancestries except EUR.
+
+
+Choosing only significant proteins in the SAS ancestry
+```{r}
+selected_pop_SAS <- rcovs_sig %>%
+  filter(pop %in% "SAS") %>%
+  select(prot)
+
+dim(selected_pop_SAS)
+
+```
+
+Obtaining protein information for all
+
+```{r}
+selected_pop_SAS_all <- subset(res_m, prot %in% selected_pop_SAS$prot)
+table(selected_pop_SAS_all$pop)
+```
+
+```{r, fig.width=12, fig.height=14}
+ggplot(selected_pop_SAS_all, aes(y=pop, x=bhat, color=pop)) +
+  geom_point(aes(size =fdr.y < 0.05)) +
+  geom_errorbarh(aes(xmin=bhat-se*1.96, xmax=bhat+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Forest plot of SAS significant proteins across all ancestries",
+       x = "beta",
+       y = "Proteins") +
+   facet_grid(prot ~ .)+
+   theme_minimal() +  # Apply a minimal theme
+  theme(
+    plot.title = element_text(hjust = 0.5), # Center the plot title
+    axis.text.y=element_blank(), # remove y axis text
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_colour_manual(values=custom_colors) +
+  scale_size_manual(
+    values=c("FALSE"=2, "TRUE"=4),
+    guide=guide_legend(title="Heterogeneity (FDR)",
+                       override.aes=list(shape=c(16,16))))
+
+```
+
+
+
+
+Choosing only significant proteins in the EAS ancestry
+```{r}
+selected_pop_eas <- rcovs_sig %>%
+  filter(pop %in% "EAS") %>%
+  select(prot)
+
+dim(selected_pop_eas)
+
+```
+
+Obtaining protein information for all
+
+```{r}
+selected_pop_eas_all <- subset(res_m, prot %in% selected_pop_eas$prot)
+table(selected_pop_eas_all$pop)
+```
+
+```{r}
+ggplot(selected_pop_eas_all, aes(y=pop, x=bhat, color=pop)) +
+  geom_point(aes(size =fdr.y < 0.05)) +
+  geom_errorbarh(aes(xmin=bhat-se*1.96, xmax=bhat+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Forest plot of EAS significant proteins across all ancestries",
+       x = "beta",
+       y = "Proteins") +
+   facet_grid(prot ~ .)+
+   theme_minimal() +  # Apply a minimal theme
+  theme(
+    plot.title = element_text(hjust = 0.5), # Center the plot title
+    axis.text.y=element_blank(), # remove y axis text
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_colour_manual(values=custom_colors) +
+  scale_size_manual(
+    values=c("FALSE"=2, "TRUE"=4),
+    guide=guide_legend(title="Heterogeneity (FDR)",
+                       override.aes=list(shape=c(16,16))))
+
+```
+
+
+Choosing only significant proteins in the EAS ancestry
+```{r}
+selected_pop_afr <- rcovs_sig %>%
+  filter(pop %in% "AFR") %>%
+  select(prot)
+
+dim(selected_pop_afr)
+
+```
+
+Obtaining protein information for all
+
+```{r}
+selected_pop_afr_all <- subset(res_m, prot %in% selected_pop_afr$prot)
+table(selected_pop_afr_all$pop)
+```
+
+
+```{r}
+ggplot(selected_pop_afr_all, aes(y=pop, x=bhat, color=pop)) +
+  geom_point(aes(size =fdr.y < 0.05)) +
+  geom_errorbarh(aes(xmin=bhat-se*1.96, xmax=bhat+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Forest plot of AFR significant proteins across all ancestries",
+       x = "beta",
+       y = "Proteins") +
+   facet_grid(prot ~ .)+
+   theme_minimal() +  # Apply a minimal theme
+  theme(
+    plot.title = element_text(hjust = 0.5), # Center the plot title
+    axis.text.y=element_blank(), # remove y axis text
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_colour_manual(values=custom_colors) +
+  scale_size_manual(
+    values=c("FALSE"=2, "TRUE"=4),
+    guide=guide_legend(title="Heterogeneity (FDR)",
+                       override.aes=list(shape=c(16,16))))
+
+```
+
+
+
+
+## Expected vs observed replication
+
+Take significant results from EUR
+Even though the power is lower in other populations, is the degree of association high enough to suggest that overall, the effects are the same
+
+```{r}
+evso <- function(b_disc, b_rep, se_disc, se_rep, alpha)
+{
+  p_sign <- pnorm(-abs(b_disc) / se_disc) * pnorm(-abs(b_disc) / se_rep) + ((1 - pnorm(-abs(b_disc) / se_disc)) * (1 - pnorm(-abs(b_disc) / se_rep)))
+  p_sig <- pnorm(-abs(b_disc) / se_rep + qnorm(alpha / 2)) + (1 - pnorm(-abs(b_disc) / se_rep - qnorm(alpha / 2)))
+  p_rep <- pnorm(abs(b_rep)/se_rep, lower.tail=FALSE)
+  res <- tibble::tibble(
+    nsnp=length(b_disc),
+    metric=c("Sign", "Sign", "P-value", "P-value"),
+    datum=c("Expected", "Observed", "Expected", "Observed"),
+    value=c(sum(p_sign, na.rm=TRUE), sum(sign(b_disc) == sign(b_rep)), sum(p_sig, na.rm=TRUE), sum(p_rep < alpha, na.rm=TRUE))
+  )
+  return(list(res=res, variants=dplyr::tibble(sig=p_sig, sign=p_sign)))
+}
+```
+
+EUR vs AFR
+
+```{r}
+eur_prot <- subset(rcovs_sig, pop == "EUR")$prot
+temp1 <- rcovs1[rcovs1$pop == "EUR" & rcovs1$prot %in% eur_prot, ]
+temp2 <- rcovs1[rcovs1$pop == "AFR" & rcovs1$prot %in% eur_prot, ]
+evso(b_disc = temp1$bhat, b_rep = temp2$bhat, se_disc = temp1$se, se_rep = temp2$se, 0.05)
+```
+
+AFR vs EUR
+
+```{r}
+afr_prot <- subset(rcovs_sig, pop == "AFR")$prot
+temp1 <- rcovs1[rcovs1$pop == "AFR" & rcovs1$prot %in% afr_prot, ]
+temp2 <- rcovs1[rcovs1$pop == "EUR" & rcovs1$prot %in% afr_prot, ]
+evso(b_disc = temp1$bhat, b_rep = temp2$bhat, se_disc = temp1$se, se_rep = temp2$se, 0.05)
+
+```
+
+
+EUR vs SAS
+
+```{r}
+eur_prot <- subset(rcovs_sig, pop == "EUR")$prot
+temp1 <- rcovs1[rcovs1$pop == "EUR" & rcovs1$prot %in% eur_prot, ]
+temp2 <- rcovs1[rcovs1$pop == "SAS" & rcovs1$prot %in% eur_prot, ]
+evso(b_disc = temp1$bhat, b_rep = temp2$bhat, se_disc = temp1$se, se_rep = temp2$se, 0.05)
+```
+SAS vs EUR
+
+```{r}
+sas_prot <- subset(rcovs_sig, pop == "SAS")$prot
+temp1 <- rcovs1[rcovs1$pop == "SAS" & rcovs1$prot %in% sas_prot, ]
+temp2 <- rcovs1[rcovs1$pop == "EUR" & rcovs1$prot %in% sas_prot, ]
+evso(b_disc = temp1$bhat, b_rep = temp2$bhat, se_disc = temp1$se, se_rep = temp2$se, 0.05)
+
+```
+
+
+
+EUR vs EAS
+
+```{r}
+eur_prot <- subset(rcovs_sig, pop == "EUR")$prot
+temp1 <- rcovs1[rcovs1$pop == "EUR" & rcovs1$prot %in% eur_prot, ]
+temp2 <- rcovs1[rcovs1$pop == "EAS" & rcovs1$prot %in% eur_prot, ]
+evso(b_disc = temp1$bhat, b_rep = temp2$bhat, se_disc = temp1$se, se_rep = temp2$se, 0.05)
+```
+
+EAS vs EUR
+```{r}
+eas_prot <- subset(rcovs_sig, pop == "EAS")$prot
+temp1 <- rcovs1[rcovs1$pop == "EAS" & rcovs1$prot %in% eas_prot, ]
+temp2 <- rcovs1[rcovs1$pop == "EUR" & rcovs1$prot %in% eas_prot, ]
+evso(b_disc = temp1$bhat, b_rep = temp2$bhat, se_disc = temp1$se, se_rep = temp2$se, 0.05)
+
+```
+
+There is a higher observed replication in AFR, SAS, and EAS populations compared to what was expected based on EUR data.
+meaning that the protein associations are also relevant in these populations.
