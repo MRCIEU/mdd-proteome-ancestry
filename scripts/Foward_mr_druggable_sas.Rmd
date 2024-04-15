@@ -1,0 +1,107 @@
+---
+title: "eas-druggable-mr"
+author: "Linda"
+date: "2024-04-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+packages
+```{r}
+library(TwoSampleMR)
+library(dplyr)
+library(here)
+library(ggplot2)
+library(png)
+library(data.table)
+
+```
+Read in exposure data
+```{r}
+all_eqtl<-read.table("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/data/Allancestry_eQTL.txt", sep="\t", header = T)
+
+eur_eqtl<-read.table("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/data//Eur_ancestry_Cis_eQTL.txt", sep="\t", header = T)
+str(all_eqtl)
+eqtl<-full_join(eur_eqtl, all_eqtl, by = c("ensembl_gene_id", "tissue", "chr", "pos", "effect_allele", "other_allele", "beta", "se", "pvalue", "code", "gene.name", "uniprot"))
+
+head(eqtl)
+```
+Read in outcome data
+```{r}
+mdd<-fread("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/scratch/FE_sas_exclu_whi_jhs_23andMe_qced_rsid.txt.gz")
+head(mdd)
+```
+creating a code column in mdd and filtering for positions incommon with eqtl
+```{r}
+
+mdd<- mdd %>% mutate(code=paste0(Chromosome, ":", Position))
+
+##Subsetting by code column
+mdd<- subset(mdd, code %in% eqtl$code)
+
+```
+Adding rsids to exposure data
+```{r}
+rsid<-mdd[,c("code", "rsid")]
+eqtl<- merge(eqtl, rsid, by="code")
+```
+Format exposure data
+```{r}
+exp_dat <- format_data(eqtl,
+                       type="exposure",
+                       snp_col="rsid",
+                       phenotype_col = "gene.name",
+                       beta_col = "beta",
+                       se_col = "se",
+                       effect_allele_col = "effect_allele",
+                       other_allele_col = "other_allele",
+                       pval_col = "pvalue",
+                       chr_col = "chr",
+                       pos_col = "pos"
+)
+
+head(exp_dat)
+```
+Formart outcome data
+```{r}
+out_dat <- format_data(mdd,
+                       type="outcome",
+                       snp_col="rsid",
+                       effect_allele_col="EA",
+                       other_allele_col="NEA",
+                       eaf_col="EAF",
+                       beta_col="BETA",
+                       se_col="SE",
+                       pval_col="P"
+)
+
+out_dat$outcome <- "MDD"
+head(out_dat)
+```
+
+Harmonise data
+```{r}
+dat <- harmonise_data(exp_dat, out_dat, action=1)
+```
+Keep just best SNP for each protein in the harmonised data
+```{r}
+dat <- dat %>%
+  group_by(id.exposure) %>%
+  arrange(pval.exposure, desc(abs(beta.exposure))) %>%
+  slice_head(n=1)
+dim(dat)
+write.csv(dat, "C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results/SAS_druggable_SNP.csv", row.names = FALSE)
+
+```
+
+Perform MR
+```{r}
+res <- mr(dat)
+save(res, file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "sas_druggable.rdata"))
+
+```
+

@@ -1,0 +1,452 @@
+---
+title: Combined forward MR analysis of all ancestries
+---
+
+## Get the data
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(writexl)
+library(here)
+
+#setwd("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final")
+```
+load the results for all ancestries into one data frame
+```{r}
+#european ancenstry(eur)
+load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "eur_druggable.rdata"))
+eur <- res
+eur$pop <- "EUR"
+
+#african ancestry(afr)
+load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "afr_druggable.rdata"))
+afr<- res
+afr$pop <- "AFR"
+
+#central south asian ancestry(csa)
+load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "sas_druggable.rdata"))
+sas<- res
+sas$pop <- "SAS"
+
+#east asian ancestry(eas)
+load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "eas_druggable.rdata"))
+eas<- res
+eas$pop <- "EAS"
+
+
+#combine all data frames 
+
+res_comb <- bind_rows(eur,eas,sas,afr)
+
+head(res_comb)
+
+
+##writing out data
+eur_report <- eur[, c(4,7,8,9,10)]
+write.csv(eur_report, "results/eur_druggable_report.csv", row.names = FALSE)
+
+
+afr_report <- afr[, c(4,7,8,9,10)]
+write.csv(afr_report, "results/afr_druggable_report.csv", row.names = FALSE)
+
+
+sas_report <- sas[, c(4,7,8,9,10)]
+write.csv(sas_report, "results/sas_druggable_report.csv", row.names = FALSE)
+
+
+eas_report <- eas[, c(4,5,7,8,9)]
+write.csv(eas_report, "results/eas_druggable_report.csv", row.names = FALSE)
+
+
+```
+
+plot results of combined data
+
+```{r}
+ggplot(res_comb, aes(y=pop, x=b, color=pop)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96)) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Combined forest plot of potential MDD drug targets across ancestry",
+       x = "beta_IV (logodds ratio per SD)",
+       y = "Proteins") +
+  facet_grid(exposure ~ .)+
+  theme_minimal() +  # Apply a minimal theme
+  theme(
+    plot.title = element_text(hjust = 0.5), # Center the plot title
+    axis.text.y=element_blank(), # remove y axis text
+    strip.text.y=element_text(angle=0)
+  )
+
+
+# Display and save results
+
+ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "combined_druggable.png"), width=10, height=10)
+```
+
+
+## Heterogeneity analysis
+
+```{r}
+fixed_effects_meta_analysis <- function(beta_vec, se_vec) {
+    w <- 1 / se_vec^2
+    beta <- sum(beta_vec * w, na.rm=T) / sum(w, na.rm=T)
+    se <- sqrt(1 / sum(w, na.rm=T))
+    pval <- pnorm(abs(beta / se), lower.tail = FALSE)
+    Qj <- w * (beta-beta_vec)^2
+    Q <- sum(Qj, na.rm=T)
+    Qdf <- sum(!is.na(beta_vec))-1
+    if(Qdf == 0) Q <- 0
+    Qjpval <- pchisq(Qj, 1, lower.tail=FALSE)
+    Qpval <- pchisq(Q, Qdf, lower.tail=FALSE)
+    return(list(beta=beta, se=se, pval=pval, Q=Q, Qdf=Qdf, Qpval=Qpval, Qj=Qj, Qjpval=Qjpval))
+}
+```
+
+
+
+# Do het analysis for all proteins
+
+```{r}
+res <- lapply(unique(res_comb$exposure), \(e) {
+  x <- subset(res_comb, exposure == e)
+  res <- fixed_effects_meta_analysis(x$b, x$se)
+  Q <- tibble(exposure=e, beta=res$beta, se=res$se, pval=res$pval, Q=res$Q, Qdf=res$Qdf, Qpval=res$Qpval)
+  Qj <- tibble(exposure=e, pop=x$pop, Qj=res$Qj, Qjpval=res$Qjpval)
+  return(list(Q,Qj))  
+})
+```
+
+# Organise the results for global heterogeneity (Q)
+
+```{r}
+resQ <- lapply(res, \(x) x[[1]]) %>% bind_rows()
+
+# Organise the results for per-study heterogeneity contributions (Qj)
+resQj <- lapply(res, \(x) x[[2]]) %>% bind_rows()
+
+# Correct for multiple testing using FDR
+resQj$fdr <- p.adjust(resQj$Qjpval, "fdr")
+```
+
+
+# Visualise the per-study heterogeneity (pval)
+
+
+```{r}
+ggplot(resQj, aes(x=exposure, y=-log10(Qjpval))) +
+geom_point(aes(colour=pop)) +
+geom_hline(yintercept=-log10(0.05))
+```
+
+
+
+# Visualise the per-study heterogeneity (FDR)
+
+```{r}
+ggplot(resQj, aes(x=exposure, y=-log10(fdr))) +
+geom_point(aes(colour=pop)) +
+geom_hline(yintercept=-log10(0.05))
+```
+
+```{r}
+res_m <- inner_join(res_comb, resQj, by=c("exposure", "pop"))
+#res_m <- (res_comb, resQj, by=c("exposure", "pop"))
+
+names(resQ)[names(resQ)=="beta"] <- "b"
+resQ$pop <- "Combined"
+
+
+ggplot(bind_rows(res_m, resQ), aes(y=pop, x=b, color=pop)) +
+  geom_point(aes(size=Qjpval < 0.05)) +
+  geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Combined forest plot of potential MDD drug targets across ancestry",
+       x = "beta_IV (logodds ratio per SD)",
+       y = "Proteins") +
+  facet_grid(exposure ~ .)+
+  theme_minimal() +  # Apply a minimal theme
+  theme(
+    plot.title = element_text(hjust = 0.5), # Center the plot title
+    axis.text.y=element_blank(), # remove y axis text
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_colour_brewer(type="qual")
+
+# todo
+# - make the colours clearer
+# - Choose how to highlight heterogeneity
+# - Order combined to be at the bottom
+```
+
+
+
+
+```{r}
+ggplot(resQ, aes(y=exposure, x=b, color=pop)) + 
+  geom_point(aes(size=Qpval < 0.05)) +  # Use size aesthetic for p-value significance
+  geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96), height=0) + 
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Combined forest plot of potential MDD drug targets",
+       x = "beta_IV (logodds ratio per SD)",
+       y = "Proteins") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),  # Center the plot title
+    axis.text.y=element_text(angle=0) # Modify y-axis text if needed
+  ) +
+  scale_colour_brewer(type="qual", palette="Set1")  # Use a clear color palette
+
+```
+
+
+Adding combined ancestry to the plot and making the exposures in the order of least shared among the four populations to the most shared among the 4 populations
+
+```{r}
+#Rename some of the res_m columns
+names(res_m)[names(res_m)=="Qj"] <- "Q"
+names(res_m)[names(res_m)=="Qjpval"] <- "Qpval"
+
+# Find common column names
+common_columns <- intersect(names(res_m), names(resQ))
+
+# Subset dataframes to include only shared columns
+shared_res_m <- res_m[, common_columns]
+shared_resQ <- resQ[, common_columns]
+
+# Combine the rows of the two dataframes
+combined_data <- rbind(shared_res_m, shared_resQ)
+
+```
+
+
+
+
+```{r}
+# Create a list that determines the number of times each exposure is shared
+exposure_shared_count <- table(bind_rows(res_m, resQ)$exposure)
+
+# Sort this list from least shared to most shared
+exposure_order <- names(exposure_shared_count[order(exposure_shared_count)])
+
+# Convert the 'exposure' column to a factor with the desired order
+combined_data$exposure <- factor(combined_data$exposure, levels = exposure_order)
+
+# Generate the plot
+ggplot(combined_data, aes(y=pop, x=b, color=pop)) +
+  geom_point(aes(size=Qpval < 0.05)) +
+  geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Combined forest plot of potential MDD drug targets across ancestry",
+       x = "beta_IV (logodds ratio per SD)",
+       y = "Proteins") +
+  facet_grid(exposure ~ ., scales = "free_y", space="free_y") +
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.y=element_blank(),
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_colour_brewer(type="qual")
+
+```
+Making the colours more clear
+```{r}
+# Define a custom color palette
+custom_colors <- c("Combined" = "#D32F2F", "EUR" = "#1976D2", "AFR" = "#388E3C", "EAS" = "#FBC02D", "SAS" = "#8E24AA")
+
+# Generate the plot
+ggplot(combined_data, aes(y=pop, x=b, color=pop)) +
+  geom_point(aes(size=Qpval < 0.05)) +
+  geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Combined forest plot of potential MDD drug targets across ancestry",
+       x = "beta_IV (logodds ratio per SD)",
+       y = "Proteins") +
+  facet_grid(exposure ~ ., scales = "free_y", space="free_y") +
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.y=element_blank(),
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_color_manual(values=custom_colors)
+
+```
+
+
+Improving on the Qjval and label it on the key as heterogeneity <0.05 instead of  Qjpval <0.05
+```{r}
+# Define a custom color palette
+custom_colors <- c("Combined" = "#D32F2F", "EUR" = "#1976D2", "AFR" = "#388E3C", "EAS" = "#C7961E", "SAS" = "#8E24AA")
+
+# Generate the plot
+ggplot(combined_data, aes(y=pop, x=b, color=pop)) +
+  geom_point(aes(size=Qpval < 0.05)) +
+  geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Combined forest plot of potential MDD drug targets across ancestry",
+       x = "beta_IV (logodds ratio per SD)",
+       y = "Proteins") +
+  facet_grid(exposure ~ ., scales = "free_y", space="free_y") +
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.y=element_blank(),
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_color_manual(values=custom_colors) +
+  scale_size_manual(name = "Heterogeneity",
+                    values = c(`TRUE` = 5, `FALSE` = 1),
+                    breaks = c(TRUE, FALSE),
+                    labels = c("Yes (< 0.05)", "No (>= 0.05)"))
+
+```
+
+Making the combined population to be at the bottom of every exposure by making the other four populations come first
+
+```{r}
+# Ensure the 'Combined' level is last
+combined_data$pop <- factor(combined_data$pop, levels = c("EUR", "AFR", "EAS", "SAS", "Combined"))
+
+# Your plotting code follows...
+
+ggplot(combined_data, aes(y=pop, x=b, color=pop)) +
+  geom_point(aes(size=Qpval < 0.05)) +
+  geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Combined forest plot of potential MDD drug targets across ancestry",
+       x = "beta_IV (logodds ratio per SD)",
+       y = "Proteins") +
+  facet_grid(exposure ~ ., scales = "free_y", space="free_y") +
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.y=element_blank(),
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_color_manual(values=custom_colors)
+
+```
+Tried to make the combine to be at the bottom but instead it was at the top so i altered the the levels
+```{r}
+# Ensure the 'Combined' level is last
+combined_data$pop <- factor(combined_data$pop, levels = c("Combined", "EUR", "AFR", "EAS", "SAS"))
+
+# Your plotting code follows...
+
+ggplot(combined_data, aes(y=pop, x=b, color=pop)) +
+  geom_point(aes(size=Qpval < 0.05)) +
+  geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Combined forest plot of potential MDD drug targets across ancestries",
+       x = "beta_IV (logodds ratio per SD)",
+       y = "Proteins") +
+  facet_grid(exposure ~ ., scales = "free_y", space="free_y") +
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.y=element_blank(),
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_color_manual(values=custom_colors)
+
+
+```
+
+```{r}
+ggplot(combined_data, aes(y=pop, x=b, color=pop)) +
+  geom_point(aes(size=Qpval < 0.05)) +
+  geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Multi ancestry forest plot of druggable MDD drug targets",
+       x = "beta_IV (logodds ratio per SD)",
+       y = "Proteins") +
+  facet_grid(exposure ~ ., scales = "free_y", space="free_y") +
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.y=element_blank(),
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_color_manual(values=custom_colors) +
+  scale_size_manual(name = "Heterogeneity",
+                    values = c(`TRUE` = 5, `FALSE` = 2),
+                    breaks = c(TRUE, FALSE),
+                    labels = c("Yes (< 0.05)", "No (>= 0.05)"))
+
+ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "combined_druggable_Q.png"), width=10, height=10)
+ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "combined_druggable_Q.pdf"), width=10, height=10)
+
+
+```
+
+
+```{r}
+ggplot(combined_data, aes(y=pop, x=b, color=pop)) +
+  geom_point(aes(size=Qpval < 0.05)) +
+  geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Multi ancestry forest plot of druggable MDD gene targets",
+       x = "Beta (logodds ratio per SD)",
+       y = "Proteins") +
+  facet_grid(exposure ~ ., scales = "free_y", space="free_y") +
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.y=element_blank(),
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_color_manual(values=custom_colors) +
+  scale_size_manual(name="Heterogeniety",
+    values=c(`TRUE` = 5, `FALSE` = 2), 
+    breaks = c(TRUE, FALSE),
+    labels = c("Yes (pvalue< 0.05)", "No (pvalue>= 0.05)"))
+    
+
+ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "combined_druggable_Q.png"), width=10, height=10)
+ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "combined_druggable_Q.pdf"), width=10, height=10)
+
+
+
+
+```
+
+```{r}
+ggplot(combined_data, aes(y=pop, x=b, color=pop)) +
+  geom_point(aes(size=Qpval < 0.05)) +
+  geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96), height=0) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  labs(title = "Multi ancestry forest plot of druggable MDD drug targets",
+       x = "beta_IV (logodds ratio per SD)",
+       y = "Proteins") +
+  facet_grid(exposure ~ ., scales = "free_y", space="free_y") +
+  theme_minimal() +  
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.y=element_blank(),
+    strip.text.y=element_text(angle=0)
+  ) +
+  scale_color_manual(values=custom_colors) +
+  scale_size_manual(
+    values=c("FALSE"=2, "TRUE"=5), 
+    guide=guide_legend(title="Heterogeneity"))
+    
+```
+
+
+```{r}
+
+combined_data_sorted <- combined_data[order(combined_data$exposure),]
+
+# Write the sorted data frame to a CSV file
+write.csv(combined_data_sorted, "C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results/combined_druggable_MR_Q_.csv", row.names = FALSE)
+
+```
+
+
+
+
+
+

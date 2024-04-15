@@ -1,0 +1,497 @@
+---
+title: "Reverse_MR"
+author: "Sandra"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, echo=FALSE}
+library(dplyr)
+library(data.table)
+library(ggplot2)
+library(parallel)
+library(glue)
+library(tidyr)
+library(tidyverse)
+```
+
+```{r}
+ukb <-  load("ukb_prot_mdd.rdata")
+Prelim <-  load("prelim-results.rdata")
+
+```
+
+
+
+
+```{r}
+head(rsimple)
+```
+
+## Perform associations
+
+```{r}
+fast_assoc <- function(y, x) {
+	index <- is.finite(y) & is.finite(x)
+	n <- sum(index)
+	y <- y[index]
+	x <- x[index]
+	#vx <- var(x)
+	vy <- var(y)
+	bhat <- stats::cov(y, x) / vy
+	ahat <- mean(x) - bhat * mean(y)
+	# fitted <- ahat + x * bhat
+	# residuals <- y - fitted
+	# SSR <- sum((residuals - mean(residuals))^2)
+	# SSF <- sum((fitted - mean(fitted))^2)
+
+	rsq <- (bhat * vy)^2 / (vy * var(x))
+	fval <- rsq * (n-2) / (1-rsq)
+	tval <- sqrt(fval)
+	se <- abs(bhat / tval)
+
+	# Fval <- (SSF) / (SSR/(n-2))
+	# pval <- pf(Fval, 1, n-2, lowe=F)
+	p <- stats::pf(fval, 1, n-2, lower.tail=FALSE)
+	return(list(
+		ahat=ahat, bhat=bhat, se=se, fval=fval, pval=p, n=n
+	))
+}
+
+phewas <- function(y, g, logistic=FALSE) {
+	out <- matrix(0, ncol(g), 6)
+	if(logistic)
+	{
+		stopifnot(all(y %in% c(0,1)))
+		for(i in 1:ncol(g))
+		{
+			o <- logistic_assoc(y, g[,i])
+			out[i, ] <- unlist(o)
+		}
+	} else {
+		for(i in 1:ncol(g))
+		{
+			o <- fast_assoc(y, g[,i])
+			out[i, ] <- unlist(o)
+		}
+	}
+
+	out <- dplyr::as_tibble(out, .name_repair="minimal")
+	names(out) <- names(o)
+	out$snp <- 1:ncol(g)
+	return(out)
+}
+```
+
+```{r}
+pops <- c("AFR", "EUR", "SAS", "EAS")
+```
+
+Perform simple analysis - no covariates etc
+
+```{r}
+rsimple <- lapply(pops, \(p) {
+  x <- prot4[[p]]
+  o <- phewas(y=unlist(x$normscore), g=as.matrix(as.matrix(x[,4:ncol(x)])))
+  o$pop=p
+  o$prot <- colnames(x[4:ncol(x)])
+  o$fdr <- p.adjust(o$pval, "fdr")
+  return(o)
+}) %>% bind_rows()
+
+rsimple %>% group_by(pop) %>%
+  summarise(n=sum(fdr < 0.05))
+```
+
+Try comparing across ancestries
+
+```{r}
+rw <- spread(rsimple %>% select(pop, bhat, prot), key=pop, value=bhat)
+head(rw)
+```
+# Subsetting the r simple dataset to obtain a dataframe with European and Africans protein with fdr < 0.05
+
+```{r}
+eur_index <- subset(rsimple, pop=="EUR" & fdr < 0.05)$prot
+afr_index <- subset(rsimple, pop=="AFR" & fdr < 0.05)$prot
+```
+
+# Performing Linear regression 
+```{r}
+summary(lm(AFR ~ EUR, rw, subset=rw$prot %in% eur_index))
+summary(lm(AFR ~ EUR, rw))
+summary(lm(EAS ~ EUR, rw, subset=rw$prot %in% eur_index))
+summary(lm(SAS ~ EUR, rw, subset=rw$prot %in% eur_index))
+summary(lm(AFR ~ EUR, rw, subset=rw$prot %in% eur_index))
+
+summary(lm(EUR ~ AFR, rw, subset=rw$prot %in% afr_index))
+summary(lm(EUR ~ AFR, rw))
+
+summary(lm(SAS ~ AFR, rw, subset=rw$prot %in% afr_index))
+summary(lm(EAS ~ AFR, rw, subset=rw$prot %in% afr_index))
+summary(lm(EAS ~ AFR, rw))
+```
+# Heatmap showing ancestry comparison
+```{r}
+rwm <- as.matrix(rw[,-1])
+rownames(rwm) <- unlist(rw[,1])
+heatmap(rwm)
+```
+Perform associations, adjusting for PCs, age etc
+
+```{r}
+phewas_covs <- function(prot4, dat) {
+  lapply(names(prot4), \(anc) {
+    x <- prot4[[anc]]
+    x <- subset(x, id %in% dat$eid)
+    ind <- match(x$id, dat$eid)
+    d <- dat[ind, ]
+    stopifnot(all(d$eid == x$id))
+    mclapply(4:ncol(x), \(i) {
+      o <- summary(lm(x[[i]] ~ d$normscore + d$age_enrollment + d$sex + d$V3 + d$V4 + d$V5 + d$V6 + d$V7 + d$V8 + d$V9 + d$V10 + d$V11 + d$V12))
+      tibble(pop=anc, prot=names(x)[i], bhat=o$coef[2,1], se=o$coef[2,2], pval=o$coef[2,4], n=o$df[1] + o$df[2])
+    }) %>% bind_rows()
+  }) %>% bind_rows()
+}
+
+```
+
+```{r}
+rcovs <- phewas_covs(prot4, dat)
+rcovs$fdr <- p.adjust(rcovs$pval, "fdr")
+table(rcovs$fdr < 0.05, rcovs$pop)
+
+
+```
+
+```{r}
+rwc <- spread(rcovs %>% select(pop, bhat, prot), key=pop, value=bhat)
+rwc
+```
+
+Correlation of mddprs-prot assocs across ancestries
+
+```{r}
+cor(rwc[,-1], use="pair")
+```
+
+regression of mddprs-prot assocs across ancestries, using all proteins, or just those that were FDR < 0.05 in the discovery ancestry
+
+```{r}
+comps <- expand.grid(pop1=pops, pop2=pops, fdr=c(0.05, 1), b=NA, se=NA, pval=NA, n=NA)
+comps <- lapply(1:nrow(comps), \(i) {
+  ind <- subset(rcovs, pop==comps$pop1[i]) %>%
+    filter(fdr < comps$fdr[i]) %>%
+    {.$prot}
+  if(length(ind) > 20) {
+    o <- summary(lm(rwc[[comps$pop1[[i]]]][rwc$prot %in% ind] ~ rwc[[comps$pop2[[i]]]][rwc$prot %in% ind]))
+    comps$b[i] <- o$coef[2,1]
+    comps$se[i] <- o$coef[2,2]
+    comps$pval[i] <- o$coef[2,4]
+    comps$n[i] <- length(ind)
+  }
+  return(comps[i,])
+}) %>% bind_rows()
+comps %>%
+  filter(pop1 != pop2) %>%
+  ggplot(., aes(y=b, x=pop2)) +
+  geom_point(aes(size=-log10(pval))) +
+  facet_grid(pop1 ~ as.factor(fdr))
+
+```
+## Excluding cases
+
+
+# Creating a new column with cases and controls for depression
+```{r}
+# Create a new column named 'Case_Control'
+dat <- dat %>%
+  mutate(Case_Control = ifelse(depression == 1, "Case", "Control"))
+
+table(dat$Case_Control)
+
+```
+
+# Group by POP (ancestry) and calculate the count of cases and controls
+```{r}
+pop_counts <- dat %>%
+  group_by(pop, Case_Control) %>%
+  summarize(Count = n())
+
+print(pop_counts)
+ 
+#Convert Depression to a factor with meaningful labels
+pop_counts$Case_Control<- factor(pop_counts$Case_Control, labels = c("Cases", "Control"))
+
+# Create a bar plot
+ggplot(pop_counts, aes(x = pop, y = Count, fill = Case_Control)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = Count), position = position_dodge(width = 0.9), vjust = -0.5) +
+  labs(title = "Cases and Controls per Ancestry",
+       x = "Ancestry (Population)",
+       y = "Frequency") +
+  scale_fill_manual(values = c("Cases" = "blue", "Control" = "red")) +
+  theme_minimal()
+
+```
+```{r}
+covariate_columns <- c("depression", "normscore", "age_enrollment" ,
+                       "V3", "V4", "V5")
+
+# Subset the data to include only the selected covariates
+covariate_data <- dat[, ..covariate_columns, drop = FALSE]
+
+# Filter numeric columns only
+numeric_columns <- names(Filter(is.numeric, covariate_data))
+covariate_data <- covariate_data[, ..numeric_columns, drop = FALSE]
+
+# Check if there are numeric columns
+if (ncol(covariate_data) == 0) {
+  stop("No numeric covariates found.")
+}
+
+# Calculate the correlation matrix
+cor_matrix <- cor(covariate_data)
+
+# Print the correlation matrix
+print(cor_matrix)
+
+# Visualization using a heatmap
+library(ggplot2)
+library(reshape2)
+
+# Melt the correlation matrix for plotting
+melted_cor_matrix <- melt(cor_matrix)
+
+# Plot the heatmap
+ggplot(melted_cor_matrix, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  theme_minimal() +
+  labs(
+    title = "Correlation Heatmap for Covariates",
+    x = "Covariate",
+    y = "Covariate"
+  )
+
+
+
+```
+
+
+# Obtaining the proteins that are ancestry specific and also performing a linear regression to understand the relationship between the proteins and depression (Cases and controls ) while adjusting for covariates like sex, normscore and age_enrolnmenr. ? THis can be adjusted further to adjust for the PCs 
+
+```{r}
+
+phewas_covs_1 <- function(prot4, dat) {
+  lapply(names(prot4), \(anc) {
+    x <- prot4[[anc]]
+    x <- subset(x, id %in% dat$eid)
+    ind <- match(x$id, dat$eid)
+    d <- dat[ind, ]
+    stopifnot(all(d$eid == x$id))
+    mclapply(4:ncol(x), \(i) {
+      #o <- summary(lm(x[[i]] ~ d$depression * d$sex + d$age_enrollment + d$V3 + d$V4 + d$V5 + d$V6 + d$V7 + d$V8 + d$V9 + d$V10 + d$V11 + d$V12))
+      o <- summary(lm(x[[i]] ~ d$depression ))
+      tibble(pop=anc, prot=names(x)[i], bhat=o$coef[2,1], se=o$coef[2,2], pval=o$coef[2,4], n=o$df[1] + o$df[2])
+    }) %>% bind_rows()
+  }) %>% bind_rows()
+}
+
+
+```
+
+# Obtaining a count of proteins per ancestry with fdr less than 0.05 as either true or false 
+```{r}
+rcovs_1 <- phewas_covs_1(prot4, dat)
+rcovs_1$fdr <- p.adjust(rcovs_1$pval, "fdr")
+table(rcovs_1$fdr < 0.05, rcovs_1$pop)
+
+
+```
+#Extracting the proteins that are specific to Africans with fdr less than 0.05 
+
+```{r}
+# Extract proteins for a specific ancestry with FDR < 0.05
+significant_proteins_ancestry <- rcovs_1$prot[rcovs_1$fdr < 0.05 & rcovs_1$pop == "AFR"]
+
+# Display the significant proteins for the ancestry
+print(significant_proteins_ancestry)
+
+```
+
+# Extract all proteins that are significantly associated with FDR < 0.05 per ancestry 
+```{r}
+# Extract significant proteins for all ancestries with FDR < 0.05
+significant_proteins_all_ancestries <- rcovs_1 %>%
+  filter(fdr < 0.05) %>%
+  select(pop, prot)
+
+# Display the table of significant proteins for all ancestries
+print(significant_proteins_all_ancestries)
+
+```
+
+
+# Obtaining a list of proteins that are shared by more than 1 ancestry 
+```{r}
+# Set the minimum number of ancestries for proteins to be considered shared
+min_ancestry_count <- 2  # Change this number based on your criteria
+
+# Count the total number of ancestries
+total_ancestry_count <- n_distinct(significant_proteins_all_ancestries$pop)
+
+# Group by protein and count the number of unique ancestries for each protein
+proteins_shared_across_ancestries <- significant_proteins_all_ancestries %>%
+  group_by(prot) %>%
+  summarise(
+    unique_ancestry_count = n_distinct(pop),
+    unique_ancestries = paste(unique(pop), collapse = ", ")
+  )
+
+# Filter proteins that are significant in more than one ancestry
+shared_proteins <- proteins_shared_across_ancestries %>%
+  filter(unique_ancestry_count >= min_ancestry_count)
+
+# Display the table of shared proteins and their associated ancestries
+print(shared_proteins)
+
+```
+
+```{r}
+library(ggplot2)
+
+# Plot shared proteins and their associated ancestries
+ggplot(shared_proteins, aes(x = unique_ancestry_count, y = prot, fill = unique_ancestries)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Shared Proteins Across Ancestries",
+    x = "Count",
+    y = "Proteins"
+  ) +
+  theme_minimal()
+
+
+```
+
+
+# Obtaining proteins for prospective MDD cases 
+
+```{r}
+dat$prospective <- dat$age_first_episode > dat$age_enrollment
+table(dat$prospective, dat$pop)
+```
+
+```{r}
+
+prospective_dat <- dat[complete.cases(dat$prospective), ]
+head(prospective_dat)
+```
+
+
+# The true is converted to 1 got MDD during the study, False had MDD during enrollment
+# There are no proteins associated with the prospective column
+
+```{r}
+prospective_dat$prospective_num <- as.numeric(prospective_dat$prospective)
+```
+
+```{r}
+phewas_covs_2 <- function(prot4, prospective_dat) {
+  lapply(names(prot4), \(anc) {
+    x <- prot4[[anc]]
+    x <- subset(x, id %in% prospective_dat$eid)
+    ind <- match(x$id, prospective_dat$eid)
+    d <- prospective_dat[ind, ]
+    stopifnot(all(d$eid == x$id))
+    mclapply(4:ncol(x), \(i) {
+      o <- summary(lm(x[[i]] ~ d$depression * d$sex + d$age_enrollment + d$V3 + d$V4 + d$V5 + d$V6 + d$V7 + d$V8 + d$V9 + d$V10 + d$V11 + d$V12))
+      tibble(pop=anc, prot=names(x)[i], bhat=o$coef[2,1], se=o$coef[2,2], pval=o$coef[2,4], n=o$df[1] + o$df[2])
+    }) %>% bind_rows()
+  }) %>% bind_rows()
+}
+
+```
+
+
+
+# Obtaining a count of proteins per ancestry with fdr less than 0.05 as either true or false 
+```{r}
+rcovs_2 <- phewas_covs_2(prot4, prospective_dat)
+rcovs_2$fdr <- p.adjust(rcovs_2$pval, "fdr")
+table(rcovs_2$fdr < 0.05, rcovs_2$pop)
+
+
+```
+
+#Extracting the proteins that are specific to Africans with fdr less than 0.05 
+
+```{r}
+# Extract proteins for a specific ancestry with FDR < 0.05
+significant_proteins_ancestry_AFR <- rcovs_2$prot[rcovs_2$fdr < 0.05 & rcovs_2$pop == "AFR"]
+
+# Display the significant proteins for the ancestry
+print(significant_proteins_ancestry_AFR)
+
+```
+
+# Extract all proteins that are significantly associated with FDR < 0.05 per ancestry 
+```{r}
+# Extract significant proteins for all ancestries with FDR < 0.05
+significant_proteins_all_ancestries_2 <- rcovs_2 %>%
+  filter(fdr < 0.05) %>%
+  select(pop, prot)
+
+# Display the table of significant proteins for all ancestries
+print(significant_proteins_all_ancestries_2)
+
+```
+
+# Obtaining a list of proteins that are shared by more than 1 ancestry 
+```{r}
+# Set the minimum number of ancestries for proteins to be considered shared
+min_ancestry_count <- 4  # Change this number based on your criteria
+
+# Count the total number of ancestries
+total_ancestry_count <- n_distinct(significant_proteins_all_ancestries_2$pop)
+
+# Group by protein and count the number of unique ancestries for each protein
+proteins_shared_across_ancestries <- significant_proteins_all_ancestries_2 %>%
+  group_by(prot) %>%
+  summarise(
+    unique_ancestry_count = n_distinct(pop),
+    unique_ancestries = paste(unique(pop), collapse = ", ")
+  )
+
+# Filter proteins that are significant in more than one ancestry
+shared_proteins <- proteins_shared_across_ancestries %>%
+  filter(unique_ancestry_count >= min_ancestry_count)
+
+# Display the table of shared proteins and their associated ancestries
+print(shared_proteins)
+
+```
+
+
+```{r}
+library(ggplot2)
+
+# Plot shared proteins and their associated ancestries
+ggplot(shared_proteins, aes(x = unique_ancestry_count, y = prot, fill = unique_ancestries)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Shared Proteins Across Ancestries",
+    x = "Count",
+    y = "Proteins"
+  ) +
+  theme_minimal()
+
+
+```
