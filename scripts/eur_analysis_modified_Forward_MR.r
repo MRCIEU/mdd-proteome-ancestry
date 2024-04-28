@@ -16,11 +16,12 @@ lapply(pqtl, dim)
 # only keep european
 pqtl <- pqtl$EUR
 head(pqtl)
-#unique(pqtl$prot)
+unique(pqtl$prot)
 #"AKT3"   "BTN2A1" "BTN3A2" "CCS"    "CD40"   "CDH6"   "DPT"    "DSG3"   "FES"    "HLA-E"  "ISLR2"  "ITIH3"  "LTBP2"  "SPRY2" "SSC4D"  "TIMP4"  "TNR"   
 # Get the p-value
 pqtl$pval <- 10^-pqtl$LOG10P
 head(pqtl)
+pqtl_sig<-pqtl[pqtl$pval < 5e-8,]
 
 # How many SNPs for one protein?
 subset(pqtl, prot == "AKT3")
@@ -46,11 +47,13 @@ head(pqtl)
 
 # Get the outcome data
 
-load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
+#load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
 
+load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon/data", "mdd_extract.rdata"))
 # Look at eur MDD GWAS
-head(eur)
-dim(eur)
+head(eur_pos)
+
+dim(eur_pos)
 
 # TwoSampleMR
 # Format data
@@ -78,7 +81,7 @@ head(exp_dat)
 
 
 # Format outcome data
-out_dat <- format_data(eur,
+out_dat <- format_data(eur_pos,
     type="outcome",
     snp_col="MarkerName",
     effect_allele_col="A1",
@@ -109,6 +112,10 @@ dat <- dat %>%
     slice_head(n=1)
 dim(dat)
 
+
+write.csv(dat, "C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results/EUR_SNP.csv", row.names = FALSE)
+
+
 # Perform MR
 
 res <- mr(dat)
@@ -119,5 +126,5 @@ geom_point() +
 geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96)) +
 geom_vline(xintercept=0)
 
-ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/results", "eur.png"))
-save(res, file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/results", "eur.rdata"))
+ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "eur.pdf"))
+save(res, file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "eur.rdata"))

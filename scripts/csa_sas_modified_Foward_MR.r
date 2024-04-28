@@ -6,8 +6,8 @@ library(ggplot2)
 
 # Read in exposure data
 
-pqtl <- readRDS(here("data", "ancestry_pqtl.rds"))
-pqtl <- readRDS(file.path("data", "ancestry_pqtl.rds"))
+
+pqtl <- readRDS(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "ancestry_pqtl.rds"))
 class(pqtl)
 
 
@@ -31,7 +31,9 @@ table(pqtl$prot)
 
 # pqtl data doesn't have rsid - get that from combined_pqtl
 
-pqtl_combined <- readRDS(file.path("data", "combined_pqtl.rds"))
+
+pqtl_combined <- readRDS(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "combined_pqtl.rds"))
+
 
 head(pqtl_combined)
 
@@ -47,11 +49,12 @@ head(pqtl)
 
 # Get the outcome data
 
-load(file.path("data", "mdd_extract.rdata"))
+
+load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon/data", "mdd_extract.rdata"))
 
 # Look at CSA MDD GWAS
-head(eur)
-dim(eur)
+head(sas)
+dim(sas)
 
 # TwoSampleMR
 # Format data
@@ -80,16 +83,16 @@ head(exp_dat)
 
 
 # Format outcome data
-head(csa)
-out_dat <- format_data(csa,
+head(sas)
+out_dat <- format_data(sas,
                        type="outcome",
                        snp_col="rsid",
-                       effect_allele_col="ALT",
-                       other_allele_col="REF",
-                       eaf_col="AF",
-                       beta_col="ES",
+                       effect_allele_col="EA",
+                       other_allele_col="NEA",
+                       eaf_col="EAF",
+                       beta_col="BETA",
                        se_col="SE",
-                       pval_col="LP"
+                       pval_col="P"
 )
 
 out_dat$outcome <- "MDD"
@@ -110,6 +113,7 @@ dat <- dat %>%
   arrange(pval.exposure, desc(abs(beta.exposure))) %>%
   slice_head(n=1)
 dim(dat)
+write.csv(dat, "C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results/SAS_SNP.csv", row.names = FALSE)
 
 # Perform MR
 
@@ -121,5 +125,5 @@ ggplot(res, aes(y=exposure, x=b)) +
   geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96)) +
   geom_vline(xintercept=0)
 
-save(res, file=file.path("results", "csa.rdata"))
-ggsave(file=file.path("results", "csaplot.png"))
+save(res, file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "sas.rdata"))
+ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "sasplot.png"))

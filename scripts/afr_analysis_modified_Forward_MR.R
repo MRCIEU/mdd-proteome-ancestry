@@ -66,7 +66,8 @@ head(pqtl)
 
 # Get the outcome data
 
-load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
+#load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
+load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon/data", "mdd_extract.rdata"))
 
 # Look at eur MDD GWAS
 head(afr)
@@ -130,6 +131,9 @@ dat <- dat %>%
   slice_head(n=1)
 dim(dat)
 
+
+write.csv(dat, "C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results/AFR_SNP.csv", row.names = FALSE)
+
 # 17 SNPS were the best
 # Perform MR
 
@@ -142,8 +146,8 @@ ggplot(res, aes(y=exposure, x=b)) +
   geom_vline(xintercept=0)
 
 
-save(res, file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/results", "afr.rdata"))
-ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/results", "afrplot.png"))
+save(res, file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "afr.rdata"))
+ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "afrplot.png"))
 
 
 

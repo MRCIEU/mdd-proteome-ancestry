@@ -54,8 +54,9 @@ dim(pqtl)
 
 # Get the outcome data
 
-file.exists(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
-load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
+#file.exists(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
+#load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/data", "mdd_extract.rdata"))
+load(file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon/data", "mdd_extract.rdata"))
 
 # Look at eur MDD GWAS
 head(eas)
@@ -120,6 +121,7 @@ dat <- dat %>%
   slice_head(n=1)
 dim(dat)
 
+write.csv(dat, "C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results/EAS_SNP.csv", row.names = FALSE)
 # Perform MR
 
 res <- mr(dat)
@@ -130,6 +132,6 @@ ggplot(res, aes(y=exposure, x=b)) +
   geom_errorbarh(aes(xmin=b-se*1.96, xmax=b+se*1.96)) +
   geom_vline(xintercept=0)
 
-save(res, file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/results", "eas.rdata"))
-ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-2023-6/results", "easplot.png"))
+save(res, file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "eas.rdata"))
+ggsave(file=file.path("C:/Users/HP OMEN GAMING/Desktop/mr-uganda-hackathon-Final/results", "easplot.png"))
 
