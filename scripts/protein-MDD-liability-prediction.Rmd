@@ -1,0 +1,548 @@
+---
+title: "Untitled"
+author: "Linda"
+date: "2024-09-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load packages
+```{r}
+library(here)
+library(dplyr)
+library(glmnet)
+library(ggplot2)
+library(caret)
+library(tidyr)
+```
+
+Preparing the data
+```{r}
+load("C:/Users/HP OMEN GAMING/Documents/mdd-proteome-ancestry/data/ukb_prot_mdd.rdata")
+```
+create a column the categorizes cases into prospective cases and retro and controls
+```{r}
+dat <- dat %>%
+  mutate(
+    prospective.depression = case_when(
+      depression == 0 & is.na(age_first_episode) ~ "control",
+      !is.na(age_first_episode) & age_first_episode <= age_enrollment ~ "retro",
+      !is.na(age_first_episode) & age_first_episode > age_enrollment ~ "pros",
+      TRUE ~ NA_character_
+    )
+  )
+table(dat$prospective.depression)
+
+```
+control    MDD- pros   MDD-retro 
+  42359    1190        7908 
+  
+  
+merge new data with prot data and replace NA value with mean 
+```{r}
+temp <- inner_join(dat %>% select(eid, prospective.depression, depression),
+    prot4 %>% bind_rows(), by=c("eid"="id"))
+
+#temp <- temp %>% select(-eid, -pop)
+
+# Set values in temp2 to mean if NA
+temp <- temp %>%
+  mutate(across(where(is.numeric), ~replace_na(., mean(., na.rm = TRUE))))
+temp$prospective.depression<- as.factor(temp$prospective.depression)
+temp$depression<- as.factor(temp$depression)
+summary(temp[,1:10])
+```
+Visulizations
+Distributions of PRS in the MDD caseS and controls
+```{r}
+tibble(dep=temp$depression, PRS=temp$normscore) %>%
+  ggplot(aes(y=PRS, x=dep)) +
+  geom_boxplot()
+```
+
+Distributions of PRS in the MDD prospective and prevalent caseS and controls
+```{r}
+tibble(dep=temp$prospective.depression, PRS=temp$normscore) %>%
+  ggplot(aes(y=PRS, x=dep)) +
+  geom_boxplot()
+```
+
+Distributions of PRS in the MDD caseS and controls per ancestry
+```{r}
+ggplot(temp, aes(x = pop, y = normscore, fill = depression)) +
+  geom_boxplot() +
+  labs(title = "Box Plot of MDD PRS by Population",
+       x = "Population Group",
+       y = "MDD PRS",
+       fill = "Depression Status (0=Control, 1=Case)") +
+  theme_minimal()
+
+```
+
+Distributions of PRS in the prospective MDD caseS and controls per ancestry
+```{r}
+ggplot(temp, aes(x = pop, y = normscore, fill = prospective.depression)) +
+  geom_boxplot() +
+  labs(title = "Box Plot of MDD PRS by Population",
+       x = "Population Group",
+       y = "MDD PRS",
+       fill = "Prospective depression Status") +
+  theme_minimal()
+
+```
+
+```{r}
+temp %>%
+  group_by(pop, depression) %>%
+  summarise(count = n(), .groups = 'drop')
+```
+
+```{r}
+table(temp$depression)
+```
+
+
+
+
+Data split
+train = all ancestries  (no prospective cases + 87% controls)
+test = all ancestries (all prospective cases + 13% controls)
+```{r}
+set.seed(123)  # For reproducibility
+
+# Split control data into 67% for training and 33% for testing
+control_indices <- which(temp$prospective.depression == "control")
+train_control_indices <- sample(control_indices, size = 0.87 * length(control_indices))
+test_control_indices <- setdiff(control_indices, train_control_indices)
+
+# Get indices for all "retro" cases (all go to training set)
+retro_indices <- which(temp$prospective.depression == "retro")
+
+# Get indices for all "pros" cases (all go to testing set)
+pros_indices <- which(temp$prospective.depression == "pros")
+
+# Create training data (all retro + 87% controls)
+train_data_initial <- temp[c(train_control_indices, retro_indices), ]
+
+# Create testing data (all pros + 13% controls)
+test_data_initial <- temp[c(test_control_indices, pros_indices), ]
+
+# Check the distribution in the training and testing sets
+table(train_data_initial$prospective.depression)
+table(test_data_initial$prospective.depression)
+
+```
+
+remove prospective.depression colummn to remain with only the required columns
+```{r}
+test_data <- test_data_initial %>% select(-prospective.depression, -eid)
+train_data <- train_data_initial %>% select(-prospective.depression, -eid,)
+
+```
+
+```{r}
+test_data_pro<-test_data %>% select(4:ncol(test_data))
+train_data_pro<-train_data %>% select(4:ncol(train_data))
+```
+
+Fit the model with cross validation
+```{r}
+set.seed(123)  # For reproducibility
+cvres2 <- cv.glmnet(
+    x = as.matrix(train_data_pro),
+    y = train_data$normscore,
+    alpha = 0.5,
+    nfolds = 5
+)
+
+```
+
+
+```{r}
+# Look at the performance of the model for different values of lambda
+plot(cvres2)
+```
+
+Generate the predictor in the All ancestry test set
+```{r}
+
+# This uses the set of coefficients that has the minimum lambda value from the cross validation
+pred2 <- predict(cvres2, newx = as.matrix(test_data_pro), s = "lambda.min")
+```
+
+```{r}
+hist(pred2, breaks=100)
+```
+
+
+```{r}
+temp_data <- tibble(y=test_data$depression, x=pred2)
+all_roc_result<-pROC::roc(y ~ x, temp_data)
+print(all_roc_result)
+
+# Extract the AUC value
+all_auc_value3 <- all_roc_result$auc
+print(all_auc_value3) 
+```
+
+
+Testing in the African data set
+```{r}
+# Filter for rows where the population is 'AFR'
+afr_test_data <- test_data %>% filter(pop == "AFR")
+#afr protein data
+afr_test_pro<-afr_test_data%>% select(4:ncol(afr_test_data))
+#predictions
+afr_pred2 <- predict(cvres2, newx = as.matrix(afr_test_pro), s = "lambda.min")
+hist(afr_pred2, breaks=100)
+# Model performance metrics
+afr_temp_data <- tibble(y=afr_test_data$depression, x=afr_pred2)
+# Create the ROC object
+afr_roc_result <- pROC::roc(y ~ x, data = afr_temp_data)
+print(afr_roc_result)
+
+# Extract the AUC value
+afr_auc_value3 <- afr_roc_result$auc
+print(afr_auc_value3) 
+```
+
+Testing in the EUR data set
+```{r}
+# Filter for rows where the population is 'EUR'
+eur_test_data <- test_data %>% filter(pop == "EUR")
+#eur protein data
+eur_test_pro<-eur_test_data%>% select(4:ncol(eur_test_data))
+#predictions
+eur_pred2 <- predict(cvres2, newx = as.matrix(eur_test_pro), s = "lambda.min")
+hist(eur_pred2, breaks=100)
+# Model performance metrics
+eur_temp_data <- tibble(y=eur_test_data$depression, x=eur_pred2)
+# Create the ROC object
+eur_roc_result <- pROC::roc(y ~ x, data = eur_temp_data)
+print(eur_roc_result)
+
+# Extract the AUC value
+eur_auc_value3 <- eur_roc_result$auc
+print(eur_auc_value3) 
+```
+Testing in the SAS data set
+```{r}
+# Filter for rows where the population is 'SAS'
+sas_test_data <- test_data %>% filter(pop == "SAS")
+#sas protein data
+sas_test_pro<-sas_test_data%>% select(4:ncol(sas_test_data))
+#predictions
+sas_pred2 <- predict(cvres2, newx = as.matrix(sas_test_pro), s = "lambda.min")
+hist(sas_pred2, breaks=100)
+# Model performance metrics
+sas_temp_data <- tibble(y=sas_test_data$depression, x=sas_pred2)
+# Create the ROC object
+sas_roc_result <- pROC::roc(y ~ x, data = sas_temp_data)
+print(sas_roc_result)
+
+# Extract the AUC value
+sas_auc_value3 <- sas_roc_result$auc
+print(sas_auc_value3) 
+```
+
+Testing in the EAS data set
+```{r}
+
+# Filter for rows where the population is 'EAS'
+eas_test_data <- test_data %>% filter(pop == "EAS")
+#eas protein data
+eas_test_pro<-eas_test_data%>% select(4:ncol(eas_test_data))
+#predictions
+eas_pred2 <- predict(cvres2, newx = as.matrix(eas_test_pro), s = "lambda.min")
+hist(eas_pred2, breaks=100)
+# Model performance metrics
+eas_temp_data <- tibble(y=eas_test_data$depression, x=eas_pred2)
+# Create the ROC object
+eas_roc_result <- pROC::roc(y ~ x, data = eas_temp_data)
+print(eas_roc_result)
+
+# Extract the AUC value
+eas_auc_value3 <- eas_roc_result$auc
+print(eas_auc_value3) 
+```
+
+
+## (2)protein -> MDD prospective cases (all ancestries)
+
+Remain with only prospective cases and controls
+```{r}
+temp2 <- temp %>% filter(prospective.depression !="retro")
+temp2$prospective.depression <- droplevels(temp2$prospective.depression)
+table(temp2$prospective.depression)
+```
+
+MDD status per ancestry in the data
+```{r}
+temp2 %>%
+  group_by(pop, depression) %>%
+  summarise(count = n(), .groups = 'drop')
+```
+
+
+Data Split
+```{r}
+set.seed(123)  # For reproducibility
+ind<-createDataPartition(temp2$depression, p = 0.67, list = FALSE)
+```
+
+Data preparation
+```{r}
+temp_2 <- temp2 %>% select(-prospective.depression, -eid)
+temp1 <- temp_2[,1:2]
+
+temp2<-temp_2 %>% select(-pop, -depression, -normscore )
+```
+
+
+# Fit the model with cross validation
+# The cross validation will help to choose the best lambda value (i.e. how much shrinkage does best for prediction)
+```{r}
+set.seed(123)
+cvres <- cv.glmnet(
+    x = as.matrix(temp2[ind,]),
+    y = temp1$depression[ind],
+    alpha = 0.5,
+    family = "binomial",
+    nfolds = 5
+)
+
+
+
+
+```
+
+```{r}
+plot(cvres)
+```
+
+```{r}
+cvres$lambda.min
+cvres$lambda.1se
+
+```
+
+Computing the final model
+```{r}
+# Final model with lambda.min
+net.model <- glmnet(
+  x = as.matrix(temp2[ind,]),
+  y = temp1$depression[ind],
+  alpha = 0.5,
+  family = "binomial",
+  lambda = cvres$lambda.min
+)
+
+
+```
+
+
+Making predictions on all ancestry test data
+
+Predicting probabilities that each observation belongs to the positive class (class 1)
+```{r}
+all_pred<-net.model %>% predict(newx=as.matrix(temp2[-ind,]))
+hist(all_pred, breaks=100)
+```
+
+```{r}
+library(pROC)
+all_data <- tibble(y=temp1$depression[-ind], x=all_pred)
+all_roc_result2<- pROC::roc(y ~ x, all_data)
+print(all_roc_result2)
+
+# Extract the AUC value
+all_auc_value2 <- all_roc_result2$auc
+print(all_auc_value2) 
+```
+
+Testing in AFR population
+```{r}
+test_2 <- temp_2[-ind, ]
+afr_test_data2<-test_2 %>% filter(pop == "AFR")
+afr_temp1.2 <- afr_test_data2[,1:2]
+afr_temp2.2<-afr_test_data2 %>% select(-pop, -depression, -normscore)
+
+#Making predictions on afr test data
+afr_pred<-net.model %>% predict(newx=as.matrix(afr_temp2.2))
+hist(afr_pred, breaks=100)
+
+afr_data <- tibble(y=afr_temp1.2$depression, x=afr_pred)
+afr_roc_result2<-pROC::roc(y ~ x, afr_data)
+print(afr_roc_result2)
+
+# Extract the AUC value
+afr_auc_value2 <- afr_roc_result2$auc
+print(afr_auc_value2) 
+
+
+```
+
+Testing in EUR population
+```{r}
+#test_2 <- temp_2[-ind, ]
+eur_test_data2<-test_2 %>% filter(pop == "EUR")
+eur_temp1.2 <- eur_test_data2[,1:2]
+eur_temp2.2<-eur_test_data2 %>% select(-pop, -depression, -normscore)
+
+#Making predictions on eur test data
+eur_pred<-net.model %>% predict(newx=as.matrix(eur_temp2.2))
+hist(eur_pred, breaks=100)
+
+eur_data <- tibble(y=eur_temp1.2$depression, x=eur_pred)
+eur_roc_result2<-pROC::roc(y ~ x, eur_data)
+print(eur_roc_result2)
+
+# Extract the AUC value
+eur_auc_value2 <- eur_roc_result2$auc
+print(afr_auc_value2) 
+
+
+```
+
+
+Testing in SAS population
+```{r}
+#test_2 <- temp_2[-ind, ]
+sas_test_data2<-test_2 %>% filter(pop == "SAS")
+sas_temp1.2 <- sas_test_data2[,1:2]
+sas_temp2.2<-sas_test_data2 %>% select(-pop, -depression, -normscore)
+
+#Making predictions on sas test data
+sas_pred<-net.model %>% predict(newx=as.matrix(sas_temp2.2))
+hist(sas_pred, breaks=100)
+
+sas_data <- tibble(y=sas_temp1.2$depression, x=sas_pred)
+sas_roc_result2<-pROC::roc(y ~ x, sas_data)
+print(sas_roc_result2)
+
+# Extract the AUC value
+sas_auc_value2 <- sas_roc_result2$auc
+print(sas_auc_value2) 
+
+
+```
+
+
+
+Testing in EAS population
+```{r}
+#test_2 <- temp_2[-ind, ]
+eas_test_data2<-test_2 %>% filter(pop == "EAS")
+eas_temp1.2 <- eas_test_data2[,1:2]
+eas_temp2.2<-eas_test_data2 %>% select(-pop, -depression, -normscore)
+
+#Making predictions on eas test data
+eas_pred<-net.model %>% predict(newx=as.matrix(eas_temp2.2))
+hist(eas_pred, breaks=100)
+
+eas_data <- tibble(y=eas_temp1.2$depression, x=eas_pred)
+eas_roc_result2<-pROC::roc(y ~ x, eas_data)
+print(eas_roc_result2)
+
+# Extract the AUC value
+eas_auc_value2 <- eas_roc_result2$auc
+print(eas_auc_value2) 
+
+
+```
+Compute AUC and CI for both reverse MR and observational prediction for each ancestry
+```{r}
+# Reverse MR prediction
+all_auc_ci_reverse <- pROC::ci.auc(all_roc_result)
+sas_auc_ci_reverse <- pROC::ci.auc(sas_roc_result)
+eur_auc_ci_reverse <- pROC::ci.auc(eur_roc_result)
+afr_auc_ci_reverse <- pROC::ci.auc(afr_roc_result)
+eas_auc_ci_reverse <- pROC::ci.auc(eas_roc_result)
+
+# Observational prediction
+all_auc_ci_obs <- pROC::ci.auc(all_roc_result2)
+sas_auc_ci_obs <- pROC::ci.auc(sas_roc_result2)
+eur_auc_ci_obs <- pROC::ci.auc(eur_roc_result2)
+afr_auc_ci_obs <- pROC::ci.auc(afr_roc_result2)
+#eas_auc_value2 <- 0  # For observational, no cases for EAS
+eas_auc_ci_obs <- pROC::ci.auc(eas_roc_result2)
+
+```
+
+Creating a Data Frame with AUC Values and CIs
+
+```{r}
+auc_data_ci <- data.frame(
+  Ancestry = rep(c("All Ancestry", "SAS", "EUR", "AFR", "EAS"), each = 2),
+  AUC_Type = rep(c("Reverse MR Prediction", "Observational Prediction"), times = 5),
+  AUC = c(all_auc_value3, all_auc_value2, sas_auc_value3, sas_auc_value2, 
+          eur_auc_value3, eur_auc_value2, afr_auc_value3, afr_auc_value2, 
+          eas_auc_value3, eas_auc_value2),
+  Lower_CI = c(all_auc_ci_reverse[1], all_auc_ci_obs[1], sas_auc_ci_reverse[1], sas_auc_ci_obs[1], 
+               eur_auc_ci_reverse[1], eur_auc_ci_obs[1], afr_auc_ci_reverse[1], afr_auc_ci_obs[1], 
+               eas_auc_ci_reverse[1], eas_auc_ci_obs[1]),
+  Upper_CI = c(all_auc_ci_reverse[3], all_auc_ci_obs[3], sas_auc_ci_reverse[3], sas_auc_ci_obs[3], 
+               eur_auc_ci_reverse[3], eur_auc_ci_obs[3], afr_auc_ci_reverse[3], afr_auc_ci_obs[3], 
+               eas_auc_ci_reverse[3], eas_auc_ci_obs[3])
+)
+
+# View the AUC data with CIs
+print(auc_data_ci)
+write.csv(auc_data_ci, "C:/Users/HP OMEN GAMING/Documents/mdd-proteome-ancestry/data/AUC Values.csv", row.names = FALSE)
+
+```
+
+Create a Forest Plot for Both AUC Types for each ancestry
+```{r}
+
+p <- ggplot(auc_data_ci, aes(y = Ancestry, x = AUC, color = AUC_Type, group = AUC_Type)) +
+  geom_point(size = 3, position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(xmin = Lower_CI, xmax = Upper_CI), width = 0.2, position = position_dodge(width = 0.5)) +
+  labs(title = "Forest Plot of AUC Values by Ancestry and Prediction Type",
+       y = "Ancestry",
+       x = "AUC (95% CI)",
+       color = "AUC Type") +
+  theme_bw() +
+  theme(axis.text.y = element_text(angle = 45, hjust = 1))
+
+# Save the plot as a PDF
+ggsave(filename = "C:/Users/HP OMEN GAMING/Documents/mdd-proteome-ancestry/results/AUC-Values_ForestPlot.pdf", plot = p, width = 8, height = 6)
+
+ggsave(filename = "C:/Users/HP OMEN GAMING/Documents/mdd-proteome-ancestry/results/AUC-Values_ForestPlot.png", plot = p, width = 8, height = 6)
+
+```
+
+```{r}
+
+ggplot(auc_data_ci, aes(y = Ancestry, x = AUC, color = AUC_Type, group = AUC_Type)) +
+  geom_point(size = 3, position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(xmin = Lower_CI, xmax = Upper_CI), width = 0.2, position = position_dodge(width = 0.5)) +
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "black") +  # Add vertical dashed line at 0.5
+  labs(title = "Forest Plot of AUC Values by Ancestry and AUC Type",
+       y = "Ancestry",
+       x = "AUC (95% CI)",
+       color = "AUC Type") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(angle = 45, hjust = 1))  # Adjust text angle if needed
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

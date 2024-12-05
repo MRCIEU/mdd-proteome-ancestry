@@ -1,4 +1,6 @@
-# Hackathon group 6 - MR course, Uganda, 2023
+# Multi-ancestry analysis of plasma protein levels influencing and responding to major depression liability
+
+Over a year ago through an MRC Network Grant researchers at the University of Bristol visited Entebbe, Uganda to provide a course on genetic epidemiology / Mendelian randomisation. Part of that course involved a hackathon to put those skills to use and this work is an extension of Hackathon group 6 - MR course, Uganda, 2023. 
 
 ## Objectives
 
@@ -52,7 +54,7 @@ Rscript scripts/extract_mdd.r
 ## Reverse MR
 
 1. Generated bim file with `scripts/bim_for_prs` script.
-2. Calculate per ancestry PRS using PRScsx.py (refer to PRScsx), MDD per ancestry GWAS summary stats and bim file using `scripts/PRScsx.sh` .
+2. Calculate per ancestry PRS using PRScsx.py (refer to [PRScsx](https://github.com/getian107/PRScsx)), MDD per ancestry GWAS summary stats and bim file using `scripts/PRScsx.sh` .
 3. Use `scripts/PRS/Association_Analysis.Rmd` to perform MDD PRS-protein association and heterogenity analysis.
 
 ## Foward MR for know druggable targets
@@ -67,3 +69,7 @@ AFR, SAS and EAS have no significant Ivs
 	SAS: `scripts/Foward_mr_druggable_sas.Rmd`
 
 3. Perform combined MR and heterogenity analysis using `scripts/combined_analysis _druggable_MR`
+
+## MDD liability prediction
+
+Use `scripts\protein-MDD-liability-prediction.Rmd` to assess ability of reverse MR to identify predictive biomarkers of MDD onset.
