@@ -57,7 +57,7 @@ Rscript scripts/extract_mdd.r
 2. Calculate per ancestry PRS using PRScsx.py (refer to [PRScsx](https://github.com/getian107/PRScsx)), MDD per ancestry GWAS summary stats and bim file using `scripts/PRScsx.sh` .
 3. Use `scripts/PRS/Association_Analysis.Rmd` to perform MDD PRS-protein association and heterogenity analysis.
 
-## Foward MR for know druggable targets
+## Foward MR for known druggable targets
 
 1. Use script `scripts/identify_druggable_eqtls_Eur_ancestry` to obtain IVs for EUR and `scripts/identify_druggable_eqtls_All_ancestry` script for all ancestry GWAS data.
 AFR, SAS and EAS have no significant Ivs
@@ -72,4 +72,4 @@ AFR, SAS and EAS have no significant Ivs
 
 ## MDD liability prediction
 
-Use `scripts\protein-MDD-liability-prediction.Rmd` to assess ability of reverse MR to identify predictive biomarkers of MDD onset.
+Use `scripts\protein-MDD-liability-prediction.Rmd` to assess the ability of reverse MR in identifying predictive biomarkers of MDD onset.
