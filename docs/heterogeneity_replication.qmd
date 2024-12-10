@@ -1,0 +1,76 @@
+---
+title: Heterogeneity replication
+format: 
+  html: 
+    embed-resources: true
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(here)
+library(metafor)
+```
+
+
+```{r}
+load(here("data/ukb_prot_mdd.rdata"))
+dim(dat)
+head(dat)
+```
+
+
+```{r}
+
+prots <- c("BTN2A1", "HLA_E", "ISLR2", "ITIH3", "LTBP2", "SPRY2", "SSC4D", "TIMP4", "TNR", "AKT3", "BTN3A2", "CCS", "CD40", "CDH6", "DPT", "DSG3", "FES") %>% tolower()
+
+protsh <- c("FES", "CD40", "CCS", "TIMP4", "LTBP2") %>% tolower()
+protsnh <- prots[!prots %in% protsh]
+table(prots %in% colnames(prot4$EUR))
+```
+
+
+```{r}
+compare_means_vars <- function(prot4, prot) {
+
+}
+```
+
+
+
+```{r}
+prot <- prots[1]
+obs_int <- function(prot4, dat, prot) {
+    temp <- lapply(prot4, \(x) {
+        a <- subset(x, select=c("id", prot)) %>%
+        left_join(dat, by=c("id"="eid"))
+        f <- paste0("depression ~ ", prot)
+        mod <- summary(lm(as.formula(f), data=a))
+        return(tibble(
+            prot=prot,
+            ncases=sum(a$depression),
+            ncontrols=sum(!a$depression),
+            pop=x$pop[1],
+            b=mod$coefficients[2,1],
+            se=mod$coefficients[2,2],
+            p=mod$coefficients[2,4]
+        ))
+    }) %>% bind_rows()
+    m <- metafor::rma.uni(yi=temp$b, sei=temp$se, method="EE")
+    names(m)
+    temp$Qpval <- m$QEp
+    return(temp)
+}
+res_obs_int <- lapply(prots, \(x) obs_int(prot4, dat, x)) %>% bind_rows()
+group_by(res_obs_int, prot %in% protsh) %>%
+    summarise(minq = min(Qpval), meanq = mean(Qpval), maxq = max(Qpval))
+```
+
+
+Reverse MR is not independent of 
+
+```{r}
+write.csv(res_obs_int, here("results/obs_int.csv"))
+```
+
+
